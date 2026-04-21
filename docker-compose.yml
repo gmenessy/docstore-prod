@@ -1,0 +1,284 @@
+# ═══════════════════════════════════════════════════════════════════
+# Agentischer Document Store — Production Deployment
+# On-Premise · DSGVO-konform · Proxy-kompatibel
+#
+# Schnellstart:
+#   cp .env.example .env
+#   # .env bearbeiten (Passwoerter, Domains)
+#   docker compose up -d
+#
+# Mit Ollama (eigenes LLM):
+#   docker compose --profile llm up -d
+#
+# Mit PostgreSQL statt SQLite:
+#   (schon Default — postgres laeuft immer)
+#
+# Mit Celery-Worker (async Ingestion):
+#   docker compose --profile worker up -d
+#
+# Mit Proxy-Build:
+#   docker compose build --build-arg HTTP_PROXY=http://proxy.example:3128 \
+#                        --build-arg HTTPS_PROXY=http://proxy.example:3128
+# ═══════════════════════════════════════════════════════════════════
+
+# ──────────────────────────────────────────────────
+# Gemeinsame Env-Variablen fuer Backend + Worker
+# ──────────────────────────────────────────────────
+x-backend-env: &backend-env
+  # Datenbank
+  DOCSTORE_DATABASE_URL: postgresql+asyncpg://docstore:${POSTGRES_PASSWORD}@postgres:5432/docstore
+  # Redis (Celery, Caching)
+  DOCSTORE_REDIS_URL: redis://redis:6379/0
+  # Ollama LLM (optional)
+  DOCSTORE_OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+  DOCSTORE_OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
+  DOCSTORE_OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
+  # Auth
+  DOCSTORE_API_KEY: ${DOCSTORE_API_KEY}
+  DOCSTORE_API_KEY_REQUIRED: ${DOCSTORE_API_KEY_REQUIRED:-true}
+  # Storage-Limits
+  DOCSTORE_MAX_STORE_SIZE_MB: ${MAX_STORE_SIZE_MB:-5000}
+  DOCSTORE_MAX_TOTAL_SIZE_MB: ${MAX_TOTAL_SIZE_MB:-50000}
+  DOCSTORE_FILE_TTL_DAYS: ${FILE_TTL_DAYS:-365}
+  # Rate-Limiting
+  DOCSTORE_RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
+  # Logging
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  UVICORN_WORKERS: ${UVICORN_WORKERS:-2}
+  # Corporate Proxy (optional)
+  HTTP_PROXY: ${HTTP_PROXY:-}
+  HTTPS_PROXY: ${HTTPS_PROXY:-}
+  NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,postgres,redis,ollama,qdrant}
+  TZ: Europe/Berlin
+
+x-restart-policy: &restart-policy
+  restart: unless-stopped
+
+# ──────────────────────────────────────────────────
+# Services
+# ──────────────────────────────────────────────────
+services:
+
+  # ── PostgreSQL — Primaere Datenbank ──
+  postgres:
+    image: postgres:16-alpine
+    <<: *restart-policy
+    container_name: docstore-postgres
+    environment:
+      POSTGRES_DB: docstore
+      POSTGRES_USER: docstore
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+      PGDATA: /var/lib/postgresql/data/pgdata
+      TZ: Europe/Berlin
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/postgres-init.sh:/docker-entrypoint-initdb.d/postgres-init.sh:ro
+    ports:
+      - "${POSTGRES_PORT:-127.0.0.1:5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docstore -d docstore"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - docstore-net
+    security_opt:
+      - no-new-privileges:true
+
+  # ── Redis — Caching, Celery-Broker ──
+  redis:
+    image: redis:7-alpine
+    <<: *restart-policy
+    container_name: docstore-redis
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-127.0.0.1:6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - docstore-net
+    security_opt:
+      - no-new-privileges:true
+
+  # ── Backend — FastAPI ──
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+    <<: *restart-policy
+    container_name: docstore-backend
+    environment: *backend-env
+    volumes:
+      - backend_data:/app/data
+      - backend_uploads:/app/uploads
+      - backend_outputs:/app/outputs
+      - backend_logs:/app/logs
+    ports:
+      - "${BACKEND_PORT:-127.0.0.1:8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - docstore-net
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: ${BACKEND_MEM_LIMIT:-2G}
+        reservations:
+          memory: 512M
+
+  # ── Celery-Worker — Async Ingestion (optional) ──
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    <<: *restart-policy
+    container_name: docstore-worker
+    profiles: ["worker"]
+    environment: *backend-env
+    volumes:
+      - backend_data:/app/data
+      - backend_uploads:/app/uploads
+      - backend_outputs:/app/outputs
+      - backend_logs:/app/logs
+    command: >
+      celery -A app.tasks worker
+      --loglevel=info
+      --concurrency=${CELERY_CONCURRENCY:-2}
+      --max-tasks-per-child=100
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - docstore-net
+    security_opt:
+      - no-new-privileges:true
+
+  # ── Frontend — React SPA + nginx ──
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+    <<: *restart-policy
+    container_name: docstore-frontend
+    environment:
+      DOCSTORE_API_BASE: /api/v1
+      DOCSTORE_API_KEY: ""
+      TZ: Europe/Berlin
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - docstore-net
+    security_opt:
+      - no-new-privileges:true
+
+  # ── Ollama — LLM-Server (optional, Profile: llm) ──
+  ollama:
+    image: ollama/ollama:latest
+    <<: *restart-policy
+    container_name: docstore-ollama
+    profiles: ["llm"]
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "${OLLAMA_PORT:-127.0.0.1:11434}:11434"
+    environment:
+      OLLAMA_HOST: 0.0.0.0
+      OLLAMA_NUM_PARALLEL: 2
+      OLLAMA_MAX_LOADED_MODELS: 2
+      TZ: Europe/Berlin
+    healthcheck:
+      test: ["CMD", "sh", "-c", "ollama list || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - docstore-net
+
+  # ── Qdrant — Vector-DB (optional, Profile: vectors) ──
+  qdrant:
+    image: qdrant/qdrant:latest
+    <<: *restart-policy
+    container_name: docstore-qdrant
+    profiles: ["vectors"]
+    volumes:
+      - qdrant_data:/qdrant/storage
+    ports:
+      - "${QDRANT_PORT:-127.0.0.1:6333}:6333"
+    healthcheck:
+      test: ["CMD", "sh", "-c", "bash -c ':> /dev/tcp/127.0.0.1/6333'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - docstore-net
+
+# ──────────────────────────────────────────────────
+# Netzwerk — isoliert
+# ──────────────────────────────────────────────────
+networks:
+  docstore-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+# ──────────────────────────────────────────────────
+# Persistente Volumes
+# ──────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  backend_data:
+    driver: local
+  backend_uploads:
+    driver: local
+  backend_outputs:
+    driver: local
+  backend_logs:
+    driver: local
+  ollama_data:
+    driver: local
+  qdrant_data:
+    driver: local

@@ -1,0 +1,62 @@
+# ═══════════════════════════════════════════════════════════════
+# Prometheus — Scrape Configuration
+# ═══════════════════════════════════════════════════════════════
+
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+  external_labels:
+    environment: "production"
+    service: "docstore"
+
+# Alert-Rules (optional)
+rule_files:
+  # - "alerts.yml"
+
+scrape_configs:
+  # ── Prometheus selbst ──
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # ── Docstore Backend ──
+  # Das Backend stellt Metriken unter /metrics bereit (wenn prometheus_fastapi_instrumentator
+  # installiert ist). Andernfalls scrapen wir den Health-Endpunkt.
+  - job_name: "docstore-backend"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["backend:8000"]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: "docstore-backend"
+
+  # Fallback: Health-Check Probing
+  - job_name: "docstore-backend-health"
+    metrics_path: "/probe"
+    static_configs:
+      - targets: ["backend:8000/health"]
+
+  # ── Host-Metriken ──
+  - job_name: "node-exporter"
+    static_configs:
+      - targets: ["node-exporter:9100"]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: "docstore-host"
+
+  # ── PostgreSQL ──
+  - job_name: "postgres-exporter"
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+
+  # ── Redis ──
+  - job_name: "redis-exporter"
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+
+  # ── Traefik (wenn aktiviert) ──
+  - job_name: "traefik"
+    static_configs:
+      - targets: ["traefik:8080"]

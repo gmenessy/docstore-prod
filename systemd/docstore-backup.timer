@@ -1,0 +1,15 @@
+[Unit]
+Description=Docstore-Backup Timer — alle 6h
+Requires=docstore-backup.service
+
+[Timer]
+# Alle 6 Stunden (00:00, 06:00, 12:00, 18:00)
+OnCalendar=00/6:00:00
+# Beim Boot nachholen falls verpasst
+Persistent=true
+# Zufaellige Verzoegerung max. 15 Min (vermeidet Last-Spikes)
+RandomizedDelaySec=15min
+Unit=docstore-backup.service
+
+[Install]
+WantedBy=timers.target

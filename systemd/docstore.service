@@ -1,0 +1,58 @@
+# ═══════════════════════════════════════════════════════════════
+# Agentischer Document Store — systemd Unit
+# ═══════════════════════════════════════════════════════════════
+#
+# Installation:
+#   sudo cp systemd/docstore.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now docstore.service
+#
+# Steuerung:
+#   sudo systemctl status docstore
+#   sudo systemctl restart docstore
+#   sudo journalctl -u docstore -f
+# ═══════════════════════════════════════════════════════════════
+
+[Unit]
+Description=Agentischer Document Store (Docker Compose)
+Documentation=https://example.com/docstore
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# Installations-Verzeichnis anpassen
+WorkingDirectory=/opt/docstore-prod
+
+# Environment-File (enthaelt Proxy-Settings falls noetig)
+EnvironmentFile=-/etc/default/docstore
+
+# Start: Compose-Services hochfahren
+ExecStart=/usr/bin/docker compose up -d
+
+# Stop: sauber herunterfahren (max. 90s warten)
+ExecStop=/usr/bin/docker compose down --timeout 90
+
+# Reload: Health-Check
+ExecReload=/usr/bin/docker compose ps
+
+# Auto-Restart bei System-Neustart
+Restart=on-failure
+RestartSec=30s
+
+# Timeouts
+TimeoutStartSec=300
+TimeoutStopSec=120
+
+# Security-Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/docstore-prod /var/log/docstore
+
+[Install]
+WantedBy=multi-user.target

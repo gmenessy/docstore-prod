@@ -1,0 +1,181 @@
+# ═══════════════════════════════════════════════════════════════
+# GitLab CI/CD — Pipeline fuer Docstore
+# ═══════════════════════════════════════════════════════════════
+
+stages:
+  - test
+  - security
+  - build
+  - deploy
+
+variables:
+  DOCKER_TLS_CERTDIR: "/certs"
+  DOCKER_BUILDKIT: "1"
+  PYTHON_VERSION: "3.12"
+  # Corporate-Proxy (bei Komm.ONE vorhanden)
+  HTTP_PROXY: "${CI_HTTP_PROXY}"
+  HTTPS_PROXY: "${CI_HTTPS_PROXY}"
+  NO_PROXY: "localhost,127.0.0.1,gitlab.internal,docker"
+
+# ═══ Default Image & Cache ═══
+default:
+  image: python:${PYTHON_VERSION}-slim
+  cache:
+    key:
+      files:
+        - pyproject.toml
+    paths:
+      - .cache/pip/
+
+# ═══ Stage: Test ═══
+
+test:backend:
+  stage: test
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends libmagic1 poppler-utils libpq-dev gcc
+    - pip install --cache-dir .cache/pip -e .
+    - pip install --cache-dir .cache/pip asyncpg pydantic-settings httpx slowapi "celery[redis]" reportlab python-multipart
+  script:
+    - python -m tests.test_all
+  artifacts:
+    when: always
+    reports:
+      junit: test-results.xml
+    expire_in: 1 week
+
+test:frontend:
+  stage: test
+  image: node:20-alpine
+  cache:
+    key:
+      files:
+        - frontend/package.json
+    paths:
+      - frontend/node_modules/
+  before_script:
+    - cd frontend
+    - npm install --no-audit --no-fund
+  script:
+    - npm run build
+    - ls -lh dist/
+  artifacts:
+    paths:
+      - frontend/dist/
+    expire_in: 1 week
+
+lint:python:
+  stage: test
+  script:
+    - pip install ruff
+    - ruff check app/ --select E,F,W --ignore E501
+  allow_failure: true
+
+# ═══ Stage: Security ═══
+
+security:trivy:
+  stage: security
+  image: aquasec/trivy:latest
+  script:
+    - trivy fs --severity CRITICAL,HIGH --no-progress --format table .
+  allow_failure: true
+
+security:deps:
+  stage: security
+  script:
+    - pip install pip-audit
+    - pip-audit --desc
+  allow_failure: true
+
+# ═══ Stage: Build (Docker-Images) ═══
+
+.docker-build:
+  stage: build
+  image: docker:24-cli
+  services:
+    - docker:24-dind
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+  only:
+    - main
+    - tags
+
+build:backend:
+  extends: .docker-build
+  script:
+    - |
+      docker build \
+        --build-arg HTTP_PROXY="${HTTP_PROXY}" \
+        --build-arg HTTPS_PROXY="${HTTPS_PROXY}" \
+        --tag "${CI_REGISTRY_IMAGE}/backend:${CI_COMMIT_SHORT_SHA}" \
+        --tag "${CI_REGISTRY_IMAGE}/backend:${CI_COMMIT_REF_SLUG}" \
+        --file Dockerfile \
+        .
+    - docker push "${CI_REGISTRY_IMAGE}/backend:${CI_COMMIT_SHORT_SHA}"
+    - docker push "${CI_REGISTRY_IMAGE}/backend:${CI_COMMIT_REF_SLUG}"
+    - |
+      if [ "$CI_COMMIT_REF_NAME" = "main" ]; then
+        docker tag "${CI_REGISTRY_IMAGE}/backend:${CI_COMMIT_SHORT_SHA}" "${CI_REGISTRY_IMAGE}/backend:latest"
+        docker push "${CI_REGISTRY_IMAGE}/backend:latest"
+      fi
+
+build:frontend:
+  extends: .docker-build
+  script:
+    - |
+      docker build \
+        --build-arg HTTP_PROXY="${HTTP_PROXY}" \
+        --build-arg HTTPS_PROXY="${HTTPS_PROXY}" \
+        --tag "${CI_REGISTRY_IMAGE}/frontend:${CI_COMMIT_SHORT_SHA}" \
+        --tag "${CI_REGISTRY_IMAGE}/frontend:${CI_COMMIT_REF_SLUG}" \
+        --file frontend/Dockerfile \
+        ./frontend
+    - docker push "${CI_REGISTRY_IMAGE}/frontend:${CI_COMMIT_SHORT_SHA}"
+    - docker push "${CI_REGISTRY_IMAGE}/frontend:${CI_COMMIT_REF_SLUG}"
+
+# ═══ Stage: Deploy (optional, auf Tag) ═══
+
+deploy:staging:
+  stage: deploy
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache openssh-client
+    - eval $(ssh-agent -s)
+    - echo "$STAGING_SSH_PRIVATE_KEY" | ssh-add -
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - ssh-keyscan -H "$STAGING_HOST" >> ~/.ssh/known_hosts
+  script:
+    - |
+      ssh deploy@${STAGING_HOST} "
+        cd /opt/docstore-prod &&
+        docker compose pull &&
+        docker compose up -d --wait &&
+        docker compose ps"
+  environment:
+    name: staging
+    url: https://${STAGING_HOST}
+  only:
+    - main
+
+deploy:production:
+  stage: deploy
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache openssh-client
+    - eval $(ssh-agent -s)
+    - echo "$PROD_SSH_PRIVATE_KEY" | ssh-add -
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - ssh-keyscan -H "$PROD_HOST" >> ~/.ssh/known_hosts
+  script:
+    - |
+      ssh deploy@${PROD_HOST} "
+        cd /opt/docstore-prod &&
+        ./scripts/backup.sh &&
+        docker compose pull &&
+        docker compose up -d --wait &&
+        docker compose ps"
+  environment:
+    name: production
+    url: https://${PROD_HOST}
+  when: manual
+  only:
+    - tags

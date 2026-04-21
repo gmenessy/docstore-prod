@@ -1,0 +1,49 @@
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+
+# Virtual envs
+.venv
+venv
+env
+.env
+.env.*
+!.env.example
+
+# Data and logs
+data/
+uploads/
+outputs/
+logs/
+*.log
+*.db
+*.sqlite
+*.sqlite3
+backups/
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Docs
+docs/
+*.md
+!README.md
+
+# Tests (bleiben im Image fuer `make test`)
+# tests/
+
+# Node (Frontend separates Dockerfile)
+frontend/node_modules
+frontend/dist
+frontend/.vite

@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Agentischer Document Store</title>
+  <meta name="description" content="Akte & WissensDB — DSGVO-konforme Dokumentenverwaltung mit KI-gestuetzter Wiki-Pflege" />
+  <style>
+    html, body, #root { height: 100%; margin: 0; padding: 0; background: #F0F4F5; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #003A40; }
+    .loading { display: flex; align-items: center; justify-content: center; height: 100vh; color: #00B2A9; font-size: 14px; }
+  </style>
+  <!-- Runtime Config: wird beim Container-Start durch envsubst ersetzt -->
+  <script>
+    window.__DOCSTORE_API__ = "__API_BASE__";
+    window.__DOCSTORE_KEY__ = "__API_KEY__";
+  </script>
+</head>
+<body>
+  <div id="root"><div class="loading">Anwendung wird geladen...</div></div>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+</html>
