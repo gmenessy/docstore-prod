@@ -7,7 +7,7 @@ Hybrid-Suche (BM25 + Semantic) · Adaptive Chunking · NER Pipeline
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -25,6 +25,10 @@ from app.api.export import router as export_router
 from app.api.wiki import router as wiki_router
 from app.api.briefing import router as briefing_router
 from app.api.demo import router as demo_router
+from app.api.audit import router as audit_router
+from app.api.comments import router as comments_router
+from app.api.metrics import router as metrics_router
+from app.core.websocket import websocket_endpoint
 
 # ─── Logging ───
 logging.basicConfig(
@@ -111,6 +115,14 @@ app.include_router(export_router, prefix="/api/v1")
 app.include_router(wiki_router, prefix="/api/v1")
 app.include_router(briefing_router, prefix="/api/v1")
 app.include_router(demo_router, prefix="/api/v1")
+app.include_router(audit_router, prefix="/api/v1")
+app.include_router(comments_router, prefix="/api/v1")
+app.include_router(metrics_router, prefix="/api/v1")
+
+# ─── WebSocket für Echtzeit-Kollaboration ───
+@app.websocket("/api/v1/ws/comments/{store_id}")
+async def ws_comments(websocket: WebSocket, store_id: str):
+    await websocket_endpoint(websocket, store_id)
 
 
 # ─── Health & Info ───
