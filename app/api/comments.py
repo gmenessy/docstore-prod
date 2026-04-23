@@ -19,6 +19,7 @@ from sqlalchemy import select, and_
 from app.core.database import get_db, get_store_or_404
 from app.core.auth import verify_api_key
 from app.models.database import Store, gen_id
+from app.models.comments import Comment
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/comments", tags=["Comments & Collaboration"])

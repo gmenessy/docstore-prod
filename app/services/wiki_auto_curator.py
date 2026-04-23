@@ -153,10 +153,85 @@ class WikiAutoCurator:
         - Alter der verlinkten Dokumente
         - Letztes Update der Seite
         - Anzahl der Quellen
+
+        Scoring:
+        - 100 = Sehr aktuell (Quellen < 7 Tage alt)
+        - 50 = Akzeptabel (Quellen < 30 Tage alt)
+        - 0 = Veraltet (Quellen > 90 Tage alt)
         """
-        # TODO: Implementiere echte Freshness-Berechnung
-        # Für jetzt: Simulierter Score
-        return 75.0
+        from app.models.database import Document
+
+        # Source-Dokumente aus WikiPage extrahieren
+        source_docs = page.source_documents or []
+
+        if not source_docs:
+            # Keine Quellen → niedriger Freshness-Score
+            return 30.0
+
+        # Document-IDs extrahieren
+        doc_ids = [doc.get("document_id") for doc in source_docs if doc.get("document_id")]
+
+        if not doc_ids:
+            return 30.0
+
+        # Dokumente aus Datenbank laden
+        try:
+            docs_result = await db.execute(
+                select(Document)
+                .where(Document.id.in_(doc_ids))
+                .where(Document.store_id == page.store_id)
+                .where(Document.status == "indexed")
+            )
+            docs = docs_result.scalars().all()
+
+            if not docs:
+                # Keine indizierten Dokumente gefunden
+                return 20.0
+
+            # Durchschnittliches Alter der Quellen berechnen
+            total_age_days = 0
+            now = datetime.utcnow()
+
+            for doc in docs:
+                age_days = (now - doc.created_at).days
+                total_age_days += age_days
+
+            avg_age_days = total_age_days / len(docs)
+
+            # Freshness-Score basierend auf Durchschnittsalter
+            # < 7 Tage = 100, 7-30 Tage = linear abfallend, 30-90 = 50-0, > 90 = 0
+            if avg_age_days <= 7:
+                freshness_from_age = 100.0
+            elif avg_age_days <= 30:
+                # Linear abfallend von 100 auf 50
+                freshness_from_age = 100.0 - ((avg_age_days - 7) / 23 * 50)
+            elif avg_age_days <= 90:
+                # Linear abfallend von 50 auf 0
+                freshness_from_age = 50.0 - ((avg_age_days - 30) / 60 * 50)
+            else:
+                freshness_from_age = 0.0
+
+            # Bonus für Anzahl der Quellen (mehr Quellen = besser)
+            source_count_bonus = min(len(docs) * 5, 25)  # Max +25 Punkte
+
+            # Malus für alte Wiki-Seite (nicht aktualisiert trotz neuer Quellen)
+            wiki_age_days = (now - page.updated_at).days
+            staleness_penalty = min(wiki_age_days / 7, 20)  # Max -20 Punkte
+
+            # Gesamt-Score berechnen
+            overall_score = (
+                freshness_from_age * 0.6 +      # 60% Gewicht auf Quellen-Alter
+                source_count_bonus * 0.3 +       # 30% Gewicht auf Quellen-Anzahl
+                20.0                             # 20% Basis-Score
+            ) - staleness_penalty
+
+            # Auf Bereich 0-100 begrenzen
+            return max(0.0, min(100.0, overall_score))
+
+        except Exception as e:
+            logger.error(f"Fehler bei Freshness-Berechnung für {page.id}: {e}")
+            # Bei Fehler: konservativer Score
+            return 50.0
 
     async def _calculate_reference_coverage(self, page: WikiPage) -> float:
         """

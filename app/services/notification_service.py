@@ -70,14 +70,18 @@ class NotificationService:
         user_id: str,
         notification_type: str,
         data: dict,
+        channel: str = "email",
     ) -> bool:
         """
         Sende eine Benachrichtigung an einen User.
 
+        Args:
+            channel: "email" oder "inapp"
+
         Returns:
             True wenn erfolgreich, False sonst
         """
-        if not self._enabled:
+        if not self._enabled and channel == "email":
             logger.warning("E-Mail Service nicht konfiguriert")
             return False
 
@@ -85,31 +89,74 @@ class NotificationService:
             # User-Präferenzen laden
             prefs = await self._get_preferences(db, store_id, user_id)
 
-            if not prefs or not prefs.email_enabled:
+            if not prefs:
+                logger.debug(f"Keine Präferenzen für {user_id}")
+                return False
+
+            # Prüfen ob Channel aktiviert ist
+            if channel == "email" and not prefs.email_enabled:
                 logger.debug(f"E-Mail deaktiviert für {user_id}")
+                await self._log_notification(
+                    db, store_id, user_id, notification_type, data,
+                    status="skipped", channel=channel
+                )
+                return False
+
+            if channel == "inapp" and not prefs.inapp_enabled:
+                logger.debug(f"In-App deaktiviert für {user_id}")
                 return False
 
             # Prüfen ob Notification-Type aktiviert ist
             if not self._is_notification_enabled(prefs, notification_type):
                 logger.debug(f"{notification_type} deaktiviert für {user_id}")
+                await self._log_notification(
+                    db, store_id, user_id, notification_type, data,
+                    status="skipped", channel=channel
+                )
                 return False
 
             # Prüfen ob Quiet Hours aktiv sind
             if self._is_quiet_hours(prefs):
                 logger.info(f"Quiet Hours aktiv für {user_id}, Notification verzögert")
+                await self._log_notification(
+                    db, store_id, user_id, notification_type, data,
+                    status="skipped", channel=channel
+                )
                 return False
 
             # Prüfen Frequenz-Limits
-            if not await self._check_rate_limits(db, prefs):
+            if not await self._check_rate_limits(db, prefs, notification_type):
                 logger.warning(f"Rate-Limit überschritten für {user_id}")
+                await self._log_notification(
+                    db, store_id, user_id, notification_type, data,
+                    status="skipped", channel=channel
+                )
                 return False
 
-            # E-Mail erstellen und senden
-            email = self._create_email(notification_type, data, prefs)
+            # E-Mail erstellen und senden (nur bei email channel)
+            if channel == "email":
+                email = self._create_email(notification_type, data, prefs)
 
-            if await self._send_email(email):
-                # Versende-Log
-                await self._log_notification(db, store_id, user_id, notification_type, data)
+                if await self._send_email(email):
+                    # Versende-Log
+                    await self._log_notification(
+                        db, store_id, user_id, notification_type, data,
+                        status="sent", channel=channel
+                    )
+                    return True
+                else:
+                    # Fehler-Log
+                    await self._log_notification(
+                        db, store_id, user_id, notification_type, data,
+                        status="failed", error_message="SMTP error", channel=channel
+                    )
+                    return False
+            else:
+                # In-App Notifications werden hier nur geloggt
+                await self._log_notification(
+                    db, store_id, user_id, notification_type, data,
+                    status="sent", channel=channel
+                )
                 return True
 
         except Exception as e:
@@ -164,11 +211,74 @@ class NotificationService:
         self,
         db: AsyncSession,
         prefs: NotificationPreference,
+        notification_type: str = None,
     ) -> bool:
-        """Prüft ob Rate-Limits eingehalten werden"""
-        # TODO: Implementiere echte Rate-Limit-Prüfung
-        # Für jetzt: Immer True
-        return True
+        """
+        Prüft ob Rate-Limits eingehalten werden.
+
+        Rate-Limits:
+        - Max emails per day (default: 50)
+        - Max notifications per hour (default: 20)
+
+        Returns:
+            True wenn Limits eingehalten, False wenn überschritten
+        """
+        from app.models.comments import NotificationLog
+        from datetime import timedelta
+        from sqlalchemy import func, and_
+
+        user_id = prefs.user_id
+
+        try:
+            # 1. Stündliches Limit prüfen
+            one_hour_ago = datetime.now() - timedelta(hours=1)
+
+            hour_result = await db.execute(
+                select(func.count(NotificationLog.id))
+                .where(NotificationLog.user_id == user_id)
+                .where(NotificationLog.created_at >= one_hour_ago)
+                .where(NotificationLog.status == "sent")
+            )
+            hour_count = hour_result.scalar() or 0
+
+            if hour_count >= prefs.max_notifications_per_hour:
+                logger.warning(
+                    f"Rate-Limit überschritten für {user_id}: "
+                    f"{hour_count}/{prefs.max_notifications_per_hour} in letzter Stunde"
+                )
+                return False
+
+            # 2. Tägliches Limit für E-Mails prüfen
+            one_day_ago = datetime.now() - timedelta(days=1)
+
+            day_result = await db.execute(
+                select(func.count(NotificationLog.id))
+                .where(NotificationLog.user_id == user_id)
+                .where(NotificationLog.created_at >= one_day_ago)
+                .where(NotificationLog.channel == "email")
+                .where(NotificationLog.status == "sent")
+            )
+            day_count = day_result.scalar() or 0
+
+            if day_count >= prefs.max_emails_per_day:
+                logger.warning(
+                    f"E-Mail-Limit überschritten für {user_id}: "
+                    f"{day_count}/{prefs.max_emails_per_day} in letzter Tag"
+                )
+                return False
+
+            # Alle Limits eingehalten
+            logger.debug(
+                f"Rate-Limit OK für {user_id}: "
+                f"{hour_count}/{prefs.max_notifications_per_hour} pro Stunde, "
+                f"{day_count}/{prefs.max_emails_per_day} pro Tag"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"Fehler bei Rate-Limit-Prüfung für {user_id}: {e}")
+            # Bei Fehler: konservatives Verhalten (erlauben)
+            return True
 
     def _create_email(
         self,
@@ -305,10 +415,57 @@ Details: {data}
         user_id: str,
         notification_type: str,
         data: dict,
+        status: str = "sent",
+        error_message: str = None,
+        channel: str = "email",
     ):
-        """Logge eine gesendete Benachrichtigung"""
-        # TODO: Implementiere Notification-Logging
-        logger.info(f"Notification sent: {notification_type} to {user_id} in {store_id}")
+        """
+        Logge eine gesendete Benachrichtigung in die Datenbank.
+
+        Args:
+            status: "sent", "failed", oder "skipped"
+            channel: "email" oder "inapp"
+        """
+        from app.models.comments import NotificationLog
+        import json
+
+        try:
+            # Resource-Typ und ID aus data extrahieren
+            resource_type = data.get("resource_type")
+            resource_id = data.get("resource_id")
+
+            # Metadata als JSON speichern
+            metadata = json.dumps({
+                "subject": data.get("subject"),
+                "store_name": data.get("store_name"),
+                "page_title": data.get("page_title"),
+                "task_title": data.get("task_title"),
+            })
+
+            # Notification-Log erstellen
+            log_entry = NotificationLog(
+                store_id=store_id,
+                user_id=user_id,
+                notification_type=notification_type,
+                channel=channel,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                status=status,
+                error_message=error_message,
+                metadata=metadata,
+            )
+
+            db.add(log_entry)
+            await db.commit()
+
+            logger.info(
+                f"Notification logged: {notification_type} to {user_id} "
+                f"(status={status}, channel={channel})"
+            )
+
+        except Exception as e:
+            logger.error(f"Fehler beim Loggen der Notification: {e}")
+            await db.rollback()
 
 
 # ─── Global Instance ───

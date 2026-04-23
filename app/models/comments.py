@@ -116,6 +116,7 @@ class NotificationPreference(Base):
     # E-Mail-Präferenzen
     email_enabled = Column(Boolean, default=True, nullable=False)
     email_comment_mentions = Column(Boolean, default=True, nullable=False)
+    email_comment_replies = Column(Boolean, default=True, nullable=False)
     email_wiki_changes = Column(Boolean, default=False, nullable=False)
     email_task_assignments = Column(Boolean, default=True, nullable=False)
     email_daily_summary = Column(Boolean, default=False, nullable=False)
@@ -145,6 +146,7 @@ class NotificationPreference(Base):
             "user_id": self.user_id,
             "email_enabled": self.email_enabled,
             "email_comment_mentions": self.email_comment_mentions,
+            "email_comment_replies": self.email_comment_replies,
             "email_wiki_changes": self.email_wiki_changes,
             "email_task_assignments": self.email_task_assignments,
             "email_daily_summary": self.email_daily_summary,
@@ -157,4 +159,51 @@ class NotificationPreference(Base):
             "quiet_hours_start": self.quiet_hours_start.strftime("%H:%M") if self.quiet_hours_start else None,
             "quiet_hours_end": self.quiet_hours_end.strftime("%H:%M") if self.quiet_hours_end else None,
             "timezone": self.timezone,
+        }
+
+
+class NotificationLog(Base):
+    """Protokollierung gesendeter Notifications für Rate-Limiting"""
+    __tablename__ = "notification_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    store_id = Column(UUID(as_uuid=True), ForeignKey("stores.id"), nullable=False)
+    user_id = Column(String(255), nullable=False, index=True)
+
+    # Notification-Details
+    notification_type = Column(String(100), nullable=False, index=True)
+    channel = Column(String(50), nullable=False)  # "email" oder "inapp"
+
+    # Resource-Kontext
+    resource_type = Column(String(100), nullable=True)  # "document", "wiki_page", "task"
+    resource_id = Column(String(255), nullable=True)
+
+    # Status
+    status = Column(String(50), default="sent", nullable=False)  # "sent", "failed", "skipped"
+    error_message = Column(Text, nullable=True)
+
+    # Metadaten
+    metadata = Column(Text, nullable=True)  # JSON-encoded
+
+    # Timing
+    created_at = Column(DateTime(timezone=True), default=func.now(), nullable=False, index=True)
+
+    # Indexes für Rate-Limit Queries
+    __table_args__ = (
+        Index('idx_notification_user_time', 'user_id', 'created_at'),
+        Index('idx_notification_type_time', 'notification_type', 'created_at'),
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": str(self.id),
+            "store_id": str(self.store_id),
+            "user_id": self.user_id,
+            "notification_type": self.notification_type,
+            "channel": self.channel,
+            "resource_type": self.resource_type,
+            "resource_id": self.resource_id,
+            "status": self.status,
+            "error_message": self.error_message,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }
