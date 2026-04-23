@@ -28,6 +28,7 @@ from app.api.demo import router as demo_router
 from app.api.audit import router as audit_router
 from app.api.comments import router as comments_router
 from app.api.metrics import router as metrics_router
+from app.api.wiki_curator import router as wiki_curator_router
 from app.core.websocket import websocket_endpoint
 
 # ─── Logging ───
@@ -118,6 +119,7 @@ app.include_router(demo_router, prefix="/api/v1")
 app.include_router(audit_router, prefix="/api/v1")
 app.include_router(comments_router, prefix="/api/v1")
 app.include_router(metrics_router, prefix="/api/v1")
+app.include_router(wiki_curator_router, prefix="/api/v1")
 
 # ─── WebSocket für Echtzeit-Kollaboration ───
 @app.websocket("/api/v1/ws/comments/{store_id}")
