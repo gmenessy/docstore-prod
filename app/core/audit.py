@@ -119,19 +119,46 @@ class AuditLogger:
 
     async def _persist_log(self, db: AsyncSession, log_entry: dict):
         """Persistiert Audit-Log in Datenbank"""
-        # TODO: Implementieren mit eigener Audit-Tabelle
-        # Für jetzt: JSON-Log-Datei als Fallback
-        import json
-        from pathlib import Path
+        from app.models.comments import AuditLog
 
-        audit_dir = Path("data/audit")
-        audit_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            # Audit-Log in Datenbank schreiben
+            audit_log = AuditLog(
+                id=log_entry["id"],
+                store_id=log_entry["store_id"],
+                user_id=log_entry["user_id"],
+                action=log_entry["action"],
+                resource_type=log_entry.get("resource_type"),
+                resource_id=log_entry.get("resource_id"),
+                changes=log_entry.get("changes"),
+                ip_address=log_entry.get("ip_address"),
+                user_agent=log_entry.get("user_agent"),
+                metadata=log_entry.get("metadata"),
+            )
 
-        date_str = datetime.utcnow().strftime("%Y-%m-%d")
-        log_file = audit_dir / f"audit_{date_str}.jsonl"
+            db.add(audit_log)
+            await db.commit()
 
-        with open(log_file, "a") as f:
-            f.write(json.dumps(log_entry) + "\n")
+            logger.debug(f"Audit-Log in DB gespeichert: {log_entry['id']}")
+
+        except Exception as e:
+            logger.error(f"Fehler beim Speichern in DB: {e}")
+            await db.rollback()
+
+            # Fallback zu JSONL-Datei bei DB-Fehlern
+            import json
+            from pathlib import Path
+
+            audit_dir = Path("data/audit")
+            audit_dir.mkdir(parents=True, exist_ok=True)
+
+            date_str = datetime.utcnow().strftime("%Y-%m-%d")
+            log_file = audit_dir / f"audit_{date_str}.jsonl"
+
+            with open(log_file, "a") as f:
+                f.write(json.dumps(log_entry) + "\n")
+
+            logger.warning(f"Audit-Log in JSONL-Fallback gespeichert: {log_file}")
 
     def _extract_ip(self, request: Optional[Request]) -> Optional[str]:
         """Extrahiert IP-Adresse aus Request"""
@@ -166,13 +193,80 @@ class AuditLogger:
         limit: int = 1000,
     ) -> list[dict]:
         """
-        Fragt Audit-Logs ab (für Compliance-Reports).
+        Fragt Audit-Logs aus der Datenbank ab (für Compliance-Reports).
+
+        Args:
+            store_id: Store-ID
+            action: Optionaler Action-Filter
+            user_id: Optionaler User-Filter
+            start_date: Optionales Start-Datum (ISO format)
+            end_date: Optionales End-Datum (ISO format)
+            limit: Maximale Anzahl an Ergebnissen
 
         Returns:
             List von Audit-Log Einträgen
         """
-        # TODO: Implementieren mit Datenbank-Query
-        # Für jetzt: JSON-Files lesen
+        from app.models.comments import AuditLog
+        from sqlalchemy import select, and_, or_
+
+        try:
+            # Base Query
+            query = select(AuditLog).where(AuditLog.store_id == store_id)
+
+            # Filter anwenden
+            conditions = []
+
+            if action:
+                conditions.append(AuditLog.action == action)
+
+            if user_id:
+                conditions.append(AuditLog.user_id == user_id)
+
+            if start_date:
+                start_dt = datetime.fromisoformat(start_date)
+                conditions.append(AuditLog.created_at >= start_dt)
+
+            if end_date:
+                end_dt = datetime.fromisoformat(end_date)
+                conditions.append(AuditLog.created_at <= end_dt)
+
+            if conditions:
+                query = query.where(and_(*conditions))
+
+            # Sortieren (neueste zuerst)
+            query = query.order_by(AuditLog.created_at.desc())
+
+            # Limit anwenden
+            query = query.limit(limit)
+
+            # Ausführen
+            result = await db.execute(query)
+            audit_logs = result.scalars().all()
+
+            # In Dicts konvertieren
+            logs = [log.to_dict() for log in audit_logs]
+
+            logger.info(f"Audit-Query: {len(logs)} Logs gefunden für Store {store_id}")
+            return logs
+
+        except Exception as e:
+            logger.error(f"Fehler bei Audit-Query: {e}")
+
+            # Fallback zu JSONL-Dateien bei DB-Fehlern
+            return await self._query_logs_fallback(
+                store_id, action, user_id, start_date, end_date, limit
+            )
+
+    async def _query_logs_fallback(
+        self,
+        store_id: str,
+        action: Optional[str] = None,
+        user_id: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        limit: int = 1000,
+    ) -> list[dict]:
+        """Fallback zu JSONL-Dateien bei DB-Fehlern"""
         import json
         from pathlib import Path
 

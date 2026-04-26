@@ -207,3 +207,57 @@ class NotificationLog(Base):
             "error_message": self.error_message,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class AuditLog(Base):
+    """DSGVO-konforme Audit-Logs für Compliance"""
+    __tablename__ = "audit_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    store_id = Column(UUID(as_uuid=True), ForeignKey("stores.id"), nullable=False, index=True)
+
+    # User-Information
+    user_id = Column(String(255), nullable=False, index=True)
+
+    # Action
+    action = Column(String(100), nullable=False, index=True)
+
+    # Resource-Kontext
+    resource_type = Column(String(100), nullable=True, index=True)  # "document", "wiki_page", "store", etc.
+    resource_id = Column(String(255), nullable=True)
+
+    # Changes (Diff)
+    changes = Column(JSON, nullable=True)  # {"field": "old_value -> new_value"}
+
+    # Request-Information
+    ip_address = Column(String(45), nullable=True)  # IPv6-kompatibel
+    user_agent = Column(Text, nullable=True)
+
+    # Additional Metadata
+    metadata = Column(JSON, nullable=True)  # Additional context
+
+    # Timing
+    created_at = Column(DateTime(timezone=True), default=func.now(), nullable=False, index=True)
+
+    # Indexes für Performance
+    __table_args__ = (
+        Index('idx_audit_store_time', 'store_id', 'created_at'),
+        Index('idx_audit_user_time', 'user_id', 'created_at'),
+        Index('idx_audit_action_time', 'action', 'created_at'),
+        Index('idx_audit_resource', 'resource_type', 'resource_id'),
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": str(self.id),
+            "store_id": str(self.store_id),
+            "user_id": self.user_id,
+            "action": self.action,
+            "resource_type": self.resource_type,
+            "resource_id": self.resource_id,
+            "changes": self.changes,
+            "ip_address": self.ip_address,
+            "user_agent": self.user_agent,
+            "metadata": self.metadata,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
