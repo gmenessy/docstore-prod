@@ -1,0 +1,80 @@
+# Multi-Stage Build für Backend
+# Optimiert für Production: Kleine Images, Fast Builds, Security Scanning
+
+# ─── Stage 1: Builder ───
+FROM python:3.10-slim as builder
+
+# Build-Arguments für Metadata
+ARG BUILD_DATE
+ARG VCS_REF
+
+# System-Dependencies installieren
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    g++ \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Workdir setzen
+WORKDIR /build
+
+# Dependencies nur installieren (nicht die App selbst)
+COPY requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+# ─── Stage 2: Runtime ───
+FROM python:3.10-slim as runtime
+
+# Metadata-Labels
+ARG BUILD_DATE
+ARG VCS_REF
+LABEL maintainer="Claude Code <noreply@anthropic.com>" \
+      org.opencontainers.image.title="Agentischer Document Store - Backend" \
+      org.opencontainers.image.description="DSGVO-konforme Dokumentenverwaltung mit KI-gestützter Wiki-Pflege" \
+      org.opencontainers.image.version="2.1.1" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.source="https://github.com/gmenessy/docstore-prod"
+
+# Non-Root User erstellen
+RUN groupadd -r docstore && useradd -r -g docstore docstore
+
+# System-Dependencies installieren (minimal)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Workdir erstellen
+WORKDIR /app
+
+# Python-Dependencies von Builder kopieren
+COPY --from=builder /root/.local /root/.local
+
+# App-Code kopieren
+COPY app/ ./app/
+COPY alembic/ ./alembic/
+COPY alembic.ini ./
+
+# Non-Root User Rechte geben
+RUN chown -R docstore:docstore /app
+
+# User wechseln
+USER docstore
+
+# Python-PATH setzen
+ENV PATH=/root/.local/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    TMPDIR=/tmp
+
+# Health-Check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Port exposen
+EXPOSE 8000
+
+# Start-Command
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

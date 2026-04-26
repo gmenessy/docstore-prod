@@ -1,0 +1,61 @@
+# Multi-Stage Build für Frontend
+# Optimiert für Production: Kleine Images, Fast Builds, Optimized Assets
+
+# ─── Stage 1: Builder ───
+FROM node:20-alpine as builder
+
+# Build-Arguments für Metadata
+ARG BUILD_DATE
+ARG VCS_REF
+
+# Dependencies installieren
+WORKDIR /build
+
+# Package-Files kopieren
+COPY frontend/package*.json ./
+
+# Dependencies installieren
+RUN npm ci --only=production && npm cache clean --force
+
+# App-Code kopieren
+COPY frontend/ ./
+
+# Environment für Production-Build setzen
+ENV NODE_ENV=production \
+    VITE_API_URL=/api/v1
+
+# Build ausführen
+RUN npm run build
+
+# ─── Stage 2: Production ───
+FROM nginx:1.25-alpine as production
+
+# Metadata-Labels
+ARG BUILD_DATE
+ARG VCS_REF
+LABEL maintainer="Claude Code <noreply@anthropic.com>" \
+      org.opencontainers.image.title="Agentischer Document Store - Frontend" \
+      org.opencontainers.image.description="React SPA für DSGVO-konforme Dokumentenverwaltung" \
+      org.opencontainers.image.version="2.1.1" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.source="https://github.com/gmenessy/docstore-prod"
+
+# Custom nginx config
+COPY docker/nginx.conf /etc/nginx/nginx.conf
+
+# Build-Artifacts von Builder kopieren
+COPY --from=builder /build/dist /usr/share/nginx/html
+
+# Non-Root User erstellen (nginx läuft als nginx User)
+RUN chown -R nginx:nginx /usr/share/nginx/html
+
+# Health-Check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD wget --quiet --tries=1 --spider http://localhost/ || exit 1
+
+# Port exposen
+EXPOSE 80
+
+# nginx startet alsForeground-Prozess
+CMD ["nginx", "-g", "daemon off;"]
