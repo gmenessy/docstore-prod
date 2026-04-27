@@ -8,8 +8,25 @@
   <meta name="description" content="Akte & WissensDB — DSGVO-konforme Dokumentenverwaltung mit KI-gestuetzter Wiki-Pflege" />
   <style>
     html, body, #root { height: 100%; margin: 0; padding: 0; background: #F0F4F5; }
-    body { font-family: Arial, Helvetica, sans-serif; color: #003A40; }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      color: #003A40;
+      /* Mobile Optimizations */
+      touch-action: manipulation; /* Verhindert double-tap zoom */
+      -webkit-tap-highlight-color: transparent;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
     .loading { display: flex; align-items: center; justify-content: center; height: 100vh; color: #00B2A9; font-size: 14px; }
+
+    /* Mobile Responsive Breakpoints */
+    @media (max-width: 768px) {
+      body { font-size: 14px; }
+      html, body, #root { overflow-x: hidden; }
+    }
+    @media (min-width: 769px) and (max-width: 1024px) {
+      body { font-size: 15px; }
+    }
   </style>
   <!-- Runtime Config: wird beim Container-Start durch envsubst ersetzt -->
   <script>

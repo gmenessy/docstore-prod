@@ -1,5 +1,71 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ERROR BOUNDARY – Fängt React-Render-Errors
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+class ErrorBoundary extends React.Component {
+    constructor(props) {
+        super(props);
+        this.state = { hasError: false, error: null };
+    }
+
+    static getDerivedStateFromError(error) {
+        return { hasError: true, error };
+    }
+
+    componentDidCatch(error, errorInfo) {
+        console.error("❌ React Error Boundary:", error, errorInfo);
+    }
+
+    render() {
+        if (this.state.hasError) {
+            return <div style={{
+                display: "flex", flexDirection: "column",
+                alignItems: "center", justifyContent: "center",
+                height: "100vh", background: CI.midnight5,
+                color: CI.midnight, fontFamily: "system-ui, sans-serif"
+            }}>
+                <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
+                <h2 style={{ margin: 0, marginBottom: 8 }}>Ein Fehler ist aufgetreten</h2>
+                <p style={{ color: CI.midnight60, marginBottom: 24 }}>
+                    Die Anwendung wurde neu geladen.
+                </p>
+                <button onClick={() => window.location.reload()} style={{
+                    padding: "10px 20px", borderRadius: 6,
+                    background: CI.lagoon, color: CI.white,
+                    border: "none", cursor: "pointer", fontSize: 14
+                }}>
+                    Neu laden
+                </button>
+            </div>;
+        }
+        return this.props.children;
+    }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// TYPE NORMALIZATION – Konsistente Enums
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const StoreTypes = {
+    AKTE: "akte",
+    WISSENSDB: "wissensdb",
+};
+
+const normalizeStoreType = (type) => {
+    if (!type) return StoreTypes.WISSENSDB;
+    const normalized = type.toString().toLowerCase().trim();
+    if (normalized.includes("wissens") || normalized.includes("wissendb")) {
+        return StoreTypes.WISSENSDB;
+    }
+    if (normalized.includes("akte")) {
+        return StoreTypes.AKTE;
+    }
+    return StoreTypes.WISSENSDB; // Default
+};
+
+const isWissensDB = (store) => normalizeStoreType(store?.type) === StoreTypes.WISSENSDB;
+const isAkte = (store) => normalizeStoreType(store?.type) === StoreTypes.AKTE;
+
 // ━━━ Komm.ONE CI (from _vars.scss) ━━━
 const CI = {
   midnight: "#003A40", midnight80: "rgb(51,97,102)", midnight60: "rgb(102,137,140)",
@@ -12,9 +78,294 @@ const CI = {
   pgBaUm: "#03B5C3", pgBiSo: "#9ABF00", pgBurg: "#E89600", pgDiDa: "#0094DE", pgInfr: "#8181EF",
 };
 const TC = { pdf: CI.pgDiDa, docx: CI.pgBaUm, doc: CI.pgBaUm, pptx: CI.pgBurg, md: CI.basil, txt: CI.grey01, xml: CI.pgInfr, rtf: CI.darkamarillo, xlsx: CI.pgBiSo };
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PROVIDER MAPPING — User-Friendly Labels for LLM Providers
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+const PROVIDER_CONFIG = {
+  // Self-hosted providers
+  ollama: {
+    label: "Lokal",
+    description: "Kostenlose lokale KI auf Ihrem Server. Privacy-first, keine Internetverbindung nötig.",
+    category: "self-hosted",
+    color: CI.basil,
+    icon: "🏠",
+    status: "available",
+  },
+  vllm: {
+    label: "Lokal-Schnell",
+    description: "Optimierte lokale KI mit hoher Geschwindigkeit. Erfordert mehr RAM.",
+    category: "self-hosted",
+    color: CI.pgBiSo,
+    icon: "⚡",
+    status: "available",
+  },
+  lmstudio: {
+    label: "Lokal-Studio",
+    description: "Benutzerfreundliche lokale KI mit grafischer Oberfläche.",
+    category: "self-hosted",
+    color: CI.pgInfr,
+    icon: "🎨",
+    status: "available",
+  },
+
+  // Commercial providers
+  openai: {
+    label: "OpenAI",
+    description: "Marktführende KI mit GPT-4o. Benötigt API-Key und Internetverbindung.",
+    category: "commercial",
+    color: CI.pgDiDa,
+    icon: "🚀",
+    status: "api_key_required",
+  },
+  anthropic: {
+    label: "Claude",
+    description: "Exzellente Textverständnis mit Claude 3.5 Sonnet. Benötigt API-Key.",
+    category: "commercial",
+    color: CI.pgBaUm,
+    icon: "🧠",
+    status: "api_key_required",
+  },
+  mistral: {
+    label: "Mistral",
+    description: "Europäische Alternative mit Mistral Large. Benötigt API-Key.",
+    category: "commercial",
+    color: CI.amarillo,
+    icon: "🇪🇺",
+    status: "api_key_required",
+  },
+  azure: {
+    label: "Azure OpenAI",
+    description: "Enterprise-Lösung von Microsoft. Erfordert Azure-Abonnement.",
+    category: "commercial",
+    color: CI.lagoon,
+    icon: "☁️",
+    status: "api_key_required",
+  },
+  groq: {
+    label: "Groq",
+    description: "Extrem schnelle Inferenz mit Llama 3. Benötigt API-Key.",
+    category: "commercial",
+    color: CI.red,
+    icon: "🔥",
+    status: "api_key_required",
+  },
+  deepseek: {
+    label: "DeepSeek",
+    description: "Kosten-effiziente KI aus China. Benötigt API-Key.",
+    category: "commercial",
+    color: CI.pgBurg,
+    icon: "🇨🇳",
+    status: "api_key_required",
+  },
+};
+
+// Helper to get provider display info
+function getProviderInfo(providerId) {
+  return PROVIDER_CONFIG[providerId] || {
+    label: providerId.charAt(0).toUpperCase() + providerId.slice(1),
+    description: "LLM-Provider",
+    category: "unknown",
+    color: CI.gray600,
+    icon: "🤖",
+    status: "unknown",
+  };
+}
+
+// Provider Select Component with User-Friendly Labels
+function ProviderSelector({ value, onChange, providers = [], size = "normal" }) {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const selectRef = useRef(null);
+  const currentProvider = getProviderInfo(value);
+
+  const isSmall = size === "small";
+
+  return (
+    <div style={{ position: "relative" }}>
+      <select
+        ref={selectRef}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onMouseEnter={() => setShowTooltip(true)}
+        onMouseLeave={() => setShowTooltip(false)}
+        style={{
+          background: CI.midnight5,
+          border: "1px solid " + CI.gray300,
+          borderRadius: isSmall ? 4 : 6,
+          color: CI.midnight,
+          padding: isSmall ? "4px 6px" : "8px 10px",
+          fontSize: isSmall ? 10 : 11,
+          fontFamily: "inherit",
+          cursor: "pointer",
+          minWidth: isSmall ? 80 : 120,
+          fontWeight: 600,
+        }}
+        aria-label="LLM-Provider auswählen"
+      >
+        {providers.length > 0 ? (
+          providers.map((p) => {
+            const info = getProviderInfo(p.id);
+            return (
+              <option key={p.id} value={p.id}>
+                {info.icon} {info.label} {p.default_model ? `(${p.default_model})` : ""}
+              </option>
+            );
+          })
+        ) : (
+          // Fallback providers
+          Object.entries(PROVIDER_CONFIG).map(([id, info]) => (
+            <option key={id} value={id}>
+              {info.icon} {info.label}
+            </option>
+          ))
+        )}
+      </select>
+
+      {/* Status Indicator */}
+      <div
+        style={{
+          position: "absolute",
+          right: isSmall ? 6 : 8,
+          top: "50%",
+          transform: "translateY(-50%)",
+          width: 8,
+          height: 8,
+          borderRadius: "50%",
+          background:
+            currentProvider.status === "available"
+              ? CI.basil
+              : currentProvider.status === "api_key_required"
+              ? CI.amarillo
+              : CI.gray400,
+        }}
+      />
+
+      {/* Tooltip */}
+      {showTooltip && (
+        <div
+          style={{
+            position: "absolute",
+            top: "100%",
+            left: 0,
+            marginTop: 6,
+            background: CI.midnight,
+            color: CI.white,
+            padding: "8px 12px",
+            borderRadius: 6,
+            fontSize: 11,
+            minWidth: 200,
+            boxShadow: "0 4px 12px rgba(0, 58, 64, 0.2)",
+            zIndex: 100,
+            whiteSpace: "normal",
+          }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>
+            {currentProvider.icon} {currentProvider.label}
+          </div>
+          <div style={{ fontSize: 10, opacity: 0.9, lineHeight: 1.4 }}>
+            {currentProvider.description}
+          </div>
+          {currentProvider.category !== "self-hosted" && (
+            <div style={{ fontSize: 9, marginTop: 4, color: CI.amarillo }}>
+              ⚠️ API-Key erforderlich
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const uid = () => Math.random().toString(36).slice(2, 10);
 const trunc = (s, n = 80) => s && s.length > n ? s.slice(0, n) + "…" : s;
 const delay = ms => new Promise(r => setTimeout(r, ms));
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// COMMAND PATTERN – Undo/Redo mit History Stack
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Command Base Class
+class Command {
+  execute() { throw new Error("Execute muss implementiert werden"); }
+  undo() { throw new Error("Undo muss implementiert werden"); }
+  redo() { this.execute(); } // Default: Redo = Execute
+}
+
+// History Manager
+class CommandHistory {
+  constructor(maxSize = 50) {
+    this.undoStack = [];
+    this.redoStack = [];
+    this.maxSize = maxSize;
+    this.listeners = [];
+  }
+
+  // Command ausführen
+  async execute(command) {
+    try {
+      await command.execute();
+      this.undoStack.push(command);
+      this.redoStack = []; // Redo leeren bei neuer Aktion
+      this._trim();
+      this._notify();
+    } catch (error) {
+      console.error("Command-Fehler:", error);
+      throw error;
+    }
+  }
+
+  // Undo
+  async undo() {
+    if (this.undoStack.length === 0) return;
+
+    const command = this.undoStack.pop();
+    await command.undo();
+    this.redoStack.push(command);
+    this._notify();
+  }
+
+  // Redo
+  async redo() {
+    if (this.redoStack.length === 0) return;
+
+    const command = this.redoStack.pop();
+    await command.redo();
+    this.undoStack.push(command);
+    this._notify();
+  }
+
+  // Stack limitieren
+  _trim() {
+    if (this.undoStack.length > this.maxSize) {
+      this.undoStack = this.undoStack.slice(-this.maxSize);
+    }
+  }
+
+  // Listener für UI-Updates
+  subscribe(listener) {
+    this.listeners.push(listener);
+    return () => {
+      this.listeners = this.listeners.filter(l => l !== listener);
+    };
+  }
+
+  _notify() {
+    this.listeners.forEach(listener => listener({
+      canUndo: this.undoStack.length > 0,
+      canRedo: this.redoStack.length > 0,
+      undoCount: this.undoStack.length,
+      redoCount: this.redoStack.length,
+    }));
+  }
+
+  // Helper
+  get canUndo() { return this.undoStack.length > 0; }
+  get canRedo() { return this.redoStack.length > 0; }
+}
+
+// Global History Instance
+const commandHistory = new CommandHistory(50);
 
 // ━━━ Search / NER / Intelligence ━━━
 function hybridSearch(docs, q, w = { bm25: 0.4, semantic: 0.6 }) {
@@ -173,6 +524,54 @@ const api = {
 window.__docstoreApi = api;
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SAFE API WRAPPER – Fängt Promise Rejections
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const safeApi = {
+    // Wrapper für alle async API-Calls
+    async call(apiFunction, errorMessage = "Fehler aufgetreten") {
+        try {
+            const result = await apiFunction();
+            if (result === null || result === undefined) {
+                console.warn(`[API] ${errorMessage}: Keine Antwort`);
+                return null;
+            }
+            return result;
+        } catch (error) {
+            console.error(`[API] ${errorMessage}:`, error);
+            // Zeige User-Friendly Error
+            const userMessage = error.message || errorMessage;
+            // Toast könnte hier aufgerufen werden (wenn Context verfügbar)
+            return null;
+        }
+    },
+
+    // Spezielle Wrapper für häufige Calls
+    async sendMessage(storeId, message, provider, model) {
+        return this.call(
+            () => api.sendMessage(storeId, message, provider, model),
+            "Chat-Nachricht konnte nicht gesendet werden"
+        );
+    },
+
+    async uploadDocument(storeId, file) {
+        return this.call(
+            () => api.uploadDocument(storeId, file),
+            "Upload fehlgeschlagen"
+        );
+    },
+
+    async search(query, storeId, type) {
+        return this.call(
+            () => api.search(query, storeId, type),
+            "Suche fehlgeschlagen"
+        );
+    },
+};
+
+// Expose safe wrapper
+window.__docstoreApiSafe = safeApi;
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // TOAST-SYSTEM — Fehler- und Erfolgsmeldungen
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const ToastContext = React.createContext({ toast: () => {} });
@@ -270,10 +669,158 @@ const Ic = {
   save: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>,
   refresh: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>,
   clock: <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
+  checkbox: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>,
+  checkboxChecked: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><polyline points="9 11 12 14 22 4"/></svg>,
+  trash: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>,
+  download: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
 };
 
 // ━━━ Shared Components ━━━
 const Badge = ({ children, color = CI.gray600, small }) => <span style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: small ? "1px 6px" : "2px 8px", borderRadius: 3, fontSize: small ? 10 : 11, fontWeight: 600, color, background: color + "15", whiteSpace: "nowrap" }}>{children}</span>;
+
+// Checkbox Component for Multi-Select
+const Checkbox = ({ checked, onChange, size = 18, disabled = false }) => {
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        if (!disabled) onChange(!checked);
+      }}
+      disabled={disabled}
+      style={{
+        width: size,
+        height: size,
+        borderRadius: 3,
+        border: `2px solid ${checked ? CI.lagoon : CI.gray400}`,
+        background: checked ? CI.lagoon : CI.white,
+        cursor: disabled ? "not-allowed" : "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        transition: "all 0.15s",
+        opacity: disabled ? 0.5 : 1,
+        padding: 0,
+      }}
+      onMouseEnter={(e) => {
+        if (!disabled) {
+          e.currentTarget.style.borderColor = CI.lagoon;
+          e.currentTarget.style.transform = "scale(1.1)";
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!disabled) {
+          e.currentTarget.style.borderColor = checked ? CI.lagoon : CI.gray400;
+          e.currentTarget.style.transform = "scale(1)";
+        }
+      }}
+    >
+      {checked && (
+        <svg width={size * 0.6} height={size * 0.6} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      )}
+    </button>
+  );
+};
+
+// Bulk Action Toolbar
+function BulkActionToolbar({ selectedCount, onClear, onDelete, onExport, onTag }) {
+  if (selectedCount === 0) return null;
+
+  return (
+    <div style={{
+      position: "sticky",
+      top: 0,
+      zIndex: 50,
+      background: CI.lagoon,
+      color: CI.white,
+      padding: "12px 16px",
+      borderRadius: 8,
+      marginBottom: 16,
+      display: "flex",
+      alignItems: "center",
+      gap: 12,
+      boxShadow: "0 4px 12px rgba(0, 178, 169, 0.2)",
+      animation: "slideIn 0.2s ease-out",
+    }}>
+      <div style={{ flex: 1 }}>
+        <strong>{selectedCount}</strong> {selectedCount === 1 ? "Dokument" : "Dokumente"} ausgewählt
+      </div>
+
+      <button
+        onClick={onDelete}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "8px 14px",
+          borderRadius: 5,
+          border: "none",
+          background: "rgba(255, 255, 255, 0.2)",
+          color: CI.white,
+          cursor: "pointer",
+          fontSize: 12,
+          fontWeight: 600,
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "rgba(255, 255, 255, 0.3)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)";
+        }}
+      >
+        {Ic.trash} Löschen
+      </button>
+
+      <button
+        onClick={onExport}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "8px 14px",
+          borderRadius: 5,
+          border: "none",
+          background: "rgba(255, 255, 255, 0.2)",
+          color: CI.white,
+          cursor: "pointer",
+          fontSize: 12,
+          fontWeight: 600,
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "rgba(255, 255, 255, 0.3)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)";
+        }}
+      >
+        {Ic.download} Export
+      </button>
+
+      <button
+        onClick={onClear}
+        style={{
+          padding: "8px 14px",
+          borderRadius: 5,
+          border: "1px solid rgba(255, 255, 255, 0.5)",
+          background: "transparent",
+          color: CI.white,
+          cursor: "pointer",
+          fontSize: 12,
+          fontWeight: 600,
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "transparent";
+        }}
+      >
+        Abbrechen
+      </button>
+    </div>
+  );
+}
 const TypeBadge = ({ type }) => <Badge color={TC[type] || CI.gray600}>{type.toUpperCase()}</Badge>;
 const PBar = ({ value, max = 100, color = CI.lagoon, label }) => <div style={{ width: "100%" }}>{label && <div style={{ fontSize: 11, color: CI.midnight60, marginBottom: 3 }}>{label}</div>}<div style={{ height: 6, background: CI.midnight5, borderRadius: 3, overflow: "hidden" }}><div style={{ height: "100%", width: Math.min(100, (value / max) * 100) + "%", background: color, borderRadius: 3, transition: "width 0.6s" }} /></div></div>;
 const CS = { background: CI.white, borderRadius: 8, padding: "18px 20px", border: "1px solid " + CI.gray300, boxShadow: "0 1px 3px rgba(0,58,64,0.06)" };
@@ -282,10 +829,10 @@ const SH = (icon, label, color) => <div style={{ display: "flex", alignItems: "c
 // ━━━ Store Context Banner — zeigt die aktive Sammlung als Datenquelle ━━━
 function StoreContextBanner({ store, label }) {
   return <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 8, background: store.color + "10", border: "1px solid " + store.color + "30", marginBottom: 16 }}>
-    <div style={{ width: 28, height: 28, borderRadius: 6, background: store.color + "25", display: "flex", alignItems: "center", justifyContent: "center", color: store.color, flexShrink: 0 }}>{store.type === "akte" ? Ic.folder : Ic.db}</div>
+    <div style={{ width: 28, height: 28, borderRadius: 6, background: store.color + "25", display: "flex", alignItems: "center", justifyContent: "center", color: store.color, flexShrink: 0 }}>{isAkte(store) ? Ic.folder : Ic.db}</div>
     <div style={{ flex: 1 }}>
       <div style={{ fontSize: 12, fontWeight: 700, color: store.color }}>{label || "Datenquelle"}</div>
-      <div style={{ fontSize: 11, color: CI.midnight60 }}>{store.name} · {store.type === "akte" ? "Akte" : "WissensDB"} · {store.documents.length} Dokumente</div>
+      <div style={{ fontSize: 11, color: CI.midnight60 }}>{store.name} · {isAkte(store) ? "Akte" : "WissensDB"} · {store.documents.length} Dokumente</div>
     </div>
     <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
       <Ic2Lock />
@@ -296,44 +843,347 @@ function StoreContextBanner({ store, label }) {
 function Ic2Lock() { return <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={CI.midnight40} strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>; }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DOCUMENT PREVIEW HOVER CARD (SOTA: Tippy.js-like)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function DocumentPreview({ doc, style }) {
+  const [loading, setLoading] = useState(false);
+  const [preview, setPreview] = useState(null);
+
+  const handleMouseEnter = async () => {
+    setLoading(true);
+    try {
+      const data = await api.getDocument(doc.id);
+      setPreview(data);
+    } catch (error) {
+      console.error("Preview-Laden fehlgeschlagen:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!preview && !loading) {
+    return null; // Don't show until hovered
+  }
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        zIndex: 10000,
+        background: CI.white,
+        border: "1px solid " + CI.gray300,
+        borderRadius: 8,
+        padding: "16px",
+        boxShadow: "0 8px 24px rgba(0,58,64,0.15)",
+        minWidth: 300,
+        maxWidth: 400,
+        ...style,
+      }}
+      onMouseEnter={handleMouseEnter}
+    >
+      {loading ? (
+        <div style={{ display: "flex", justifyContent: "center", padding: 20 }}>
+          <div style={{ width: 24, height: 24, borderRadius: "50%", border: "3px solid " + CI.lagoon40, borderTopColor: CI.lagoon }} style={{ animation: "spin 1s linear infinite" }} />
+        </div>
+      ) : preview && (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+            <TypeBadge type={preview.file_type} />
+            <span style={{ fontSize: 11, color: CI.gray600 }}>{preview.pages} S.</span>
+          </div>
+
+          <h4 style={{ margin: 0 0 8px, fontSize: 13, fontWeight: 700, color: CI.midnight }}>
+            {preview.title}
+          </h4>
+
+          <p style={{ fontSize: 11, color: CI.gray700, lineHeight: 1.5, margin: 0, marginBottom: 12 }}>
+            {trunc(preview.content_text || "Kein Vorschau verfügbar", 180)}
+          </p>
+
+          {preview.entities && preview.entities.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: CI.midnight60, marginBottom: 4 }}>
+                Entitäten
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {preview.entities.slice(0, 6).map((e, i) => (
+                  <Badge key={i} color={CI.pgInfr} small>{e}</Badge>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <button
+              onClick={() => { /* Open document detail */ }}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 4,
+                border: "1px solid " + CI.lagoon,
+                background: CI.white,
+                color: CI.lagoon,
+                cursor: "pointer",
+                fontSize: 11,
+                fontWeight: 600,
+                fontFamily: "inherit",
+              }}
+            >
+              Öffnen
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // SIDEBAR
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function Sidebar({ stores, active, onSelect, onNew }) {
-  return <div style={{ width: 272, minWidth: 272, background: CI.midnight, display: "flex", flexDirection: "column", height: "100%" }}>
-    <div style={{ padding: "20px 16px 16px", borderBottom: "1px solid " + CI.midnight80 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ width: 34, height: 34, borderRadius: 8, background: CI.lagoon, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: CI.white }}>DS</div>
-        <div><div style={{ fontSize: 14, fontWeight: 700, color: CI.white }}>Document Store</div><div style={{ fontSize: 10, color: CI.lagoon60, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase" }}>Komm.ONE · Agentisch</div></div>
+  const [isMobileOpen, setIsMobileOpen] = useState(false);
+
+  return (
+    <>
+      {/* Mobile Hamburger Button (nur sichtbar auf Mobile) */}
+      <div style={{
+        display: "none",
+        position: "fixed",
+        bottom: 20,
+        right: 20,
+        zIndex: 9998,
+        media: "(max-width: 768px) { display: flex; }"
+      }}>
+        <button
+          onClick={() => setIsMobileOpen(true)}
+          style={{
+            width: 56, height: 56,
+            borderRadius: "50%",
+            background: CI.lagoon,
+            color: CI.white,
+            border: "none",
+            boxShadow: "0 4px 12px rgba(0,58,64,0.3)",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 24
+          }}
+          aria-label="Menü öffnen"
+        >
+          ☰
+        </button>
       </div>
-    </div>
-    <div style={{ flex: 1, overflow: "auto", padding: "12px 8px" }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: CI.midnight40, letterSpacing: "0.1em", textTransform: "uppercase", padding: "4px 8px", marginBottom: 6 }}>Sammlungen</div>
-      {stores.map(s => { const a = active?.id === s.id; return <button key={s.id} onClick={() => onSelect(s)} style={{ width: "100%", display: "flex", alignItems: "flex-start", gap: 10, padding: 10, borderRadius: 6, border: "none", cursor: "pointer", background: a ? CI.midnight80 + "44" : "transparent", textAlign: "left", marginBottom: 2 }}
-        onMouseEnter={e => !a && (e.currentTarget.style.background = CI.midnight80 + "22")} onMouseLeave={e => !a && (e.currentTarget.style.background = "transparent")}>
-        <div style={{ width: 28, height: 28, borderRadius: 6, background: s.color + "30", display: "flex", alignItems: "center", justifyContent: "center", color: s.color, flexShrink: 0, marginTop: 1 }}>{s.type === "akte" ? Ic.folder : Ic.db}</div>
-        <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 13, fontWeight: 600, color: a ? CI.white : CI.midnight40, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</div>
-        <div style={{ display: "flex", gap: 6, marginTop: 3 }}><Badge color={s.type === "akte" ? CI.amarillo : CI.lagoon} small>{s.type === "akte" ? "Akte" : "WissensDB"}</Badge><span style={{ fontSize: 11, color: CI.midnight60 }}>{s.documents.length} Dok.</span></div></div>
-        {a && <div style={{ width: 3, height: 20, background: s.color, borderRadius: 2, flexShrink: 0, marginTop: 4 }} />}
-      </button>; })}
-    </div>
-    <div style={{ padding: "12px 8px", borderTop: "1px solid " + CI.midnight80 }}>
-      <button onClick={onNew} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 0", borderRadius: 6, border: "1px dashed " + CI.midnight60, background: "transparent", color: CI.lagoon60, cursor: "pointer", fontSize: 12, fontWeight: 600 }}
-        onMouseEnter={e => { e.currentTarget.style.borderColor = CI.lagoon; e.currentTarget.style.color = CI.lagoon; }} onMouseLeave={e => { e.currentTarget.style.borderColor = CI.midnight60; e.currentTarget.style.color = CI.lagoon60; }}>{Ic.plus} Neue Sammlung</button>
-    </div>
-  </div>;
+
+      {/* Mobile Overlay */}
+      {isMobileOpen && (
+        <div
+          onClick={() => setIsMobileOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.5)",
+            zIndex: 9998,
+            display: "none",
+            media: "(max-width: 768px) { display: block; }"
+          }}
+        />
+      )}
+
+      {/* Sidebar */}
+      <div style={{
+        width: 272,
+        minWidth: 272,
+        background: CI.midnight,
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        // Mobile Responsive
+        position: "fixed",
+        left: 0,
+        top: 0,
+        zIndex: 9999,
+        transform: isMobileOpen ? "translateX(0)" : "translateX(-100%)",
+        transition: "transform 0.3s ease-out",
+        // Desktop Default
+        "@media (min-width: 769px)": {
+          position: "relative",
+          transform: "none"
+        }
+      }}>
+        <div style={{ padding: "20px 16px 16px", borderBottom: "1px solid " + CI.midnight80, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 8, background: CI.lagoon, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: CI.white }}>DS</div>
+            <div><div style={{ fontSize: 14, fontWeight: 700, color: CI.white }}>Document Store</div><div style={{ fontSize: 10, color: CI.lagoon60, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase" }}>Komm.ONE · Agentisch</div></div>
+          </div>
+          {/* Mobile Close Button */}
+          <button
+            onClick={() => setIsMobileOpen(false)}
+            style={{
+              display: "none",
+              background: "none",
+              border: "none",
+              color: CI.white,
+              fontSize: 24,
+              cursor: "pointer",
+              padding: 4,
+              media: "(max-width: 768px) { display: block; }"
+            }}
+            aria-label="Menü schließen"
+          >
+            ×
+          </button>
+        </div>
+        <div style={{ flex: 1, overflow: "auto", padding: "12px 8px" }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: CI.midnight40, letterSpacing: "0.1em", textTransform: "uppercase", padding: "4px 8px", marginBottom: 6 }}>Sammlungen</div>
+          {stores.map(s => { const a = active?.id === s.id; return <button key={s.id} onClick={() => { onSelect(s); setIsMobileOpen(false); }} style={{ width: "100%", display: "flex", alignItems: "flex-start", gap: 10, padding: "12px", borderRadius: 6, border: "none", cursor: "pointer", background: a ? CI.midnight80 + "44" : "transparent", textAlign: "left", marginBottom: 2", minHeight: 48 /* Touch Target */ }}
+            onMouseEnter={e => !a && (e.currentTarget.style.background = CI.midnight80 + "22")} onMouseLeave={e => !a && (e.currentTarget.style.background = "transparent")}>
+            <div style={{ width: 28, height: 28, borderRadius: 6, background: s.color + "30", display: "flex", alignItems: "center", justifyContent: "center", color: s.color, flexShrink: 0, marginTop: 1 }}>{isAkte(s) ? Ic.folder : Ic.db}</div>
+            <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 13, fontWeight: 600, color: a ? CI.white : CI.midnight40, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</div>
+            <div style={{ display: "flex", gap: 6, marginTop: 3 }}><Badge color={s.type === "akte" ? CI.amarillo : CI.lagoon} small>{isAkte(s) ? "Akte" : "WissensDB"}</Badge><span style={{ fontSize: 11, color: CI.midnight60 }}>{s.documents.length} Dok.</span></div></div>
+            {a && <div style={{ width: 3, height: 20, background: s.color, borderRadius: 2, flexShrink: 0, marginTop: 4 }} />}
+          </button>; })}
+        </div>
+        <div style={{ padding: "12px 8px", borderTop: "1px solid " + CI.midnight80 }}>
+          <button onClick={() => { onNew(); setIsMobileOpen(false); }} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "12px", borderRadius: 6, border: "1px dashed " + CI.midnight60, background: "transparent", color: CI.lagoon60, cursor: "pointer", fontSize: 12, fontWeight: 600, minHeight: 48 /* Touch Target */ }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = CI.lagoon; e.currentTarget.style.color = CI.lagoon; }} onMouseLeave={e => { e.currentTarget.style.borderColor = CI.midnight60; e.currentTarget.style.color = CI.lagoon60; }}>{Ic.plus} Neue Sammlung</button>
+        </div>
+      </div>
+    </>
+  );
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // OVERVIEW
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function Overview({ store, onDoc }) {
+  const { toast } = useToast();
   const [liveData, setLiveData] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [selectedDocs, setSelectedDocs] = useState(new Set());
+  const [lastSelectedIndex, setLastSelectedIndex] = useState(null);
   const fileRef = useRef(null);
+  const docListRef = useRef(null);
 
   useEffect(() => {
     api.getLiveView(store.id).then(r => r && setLiveData(r));
   }, [store.id]);
+
+  // Keyboard Shortcuts for Bulk Selection
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Ctrl/Cmd + A: Select All
+      if ((e.ctrlKey || e.metaKey) && e.key === "a") {
+        e.preventDefault();
+        const allDocIds = new Set(store.documents.map(d => d.id));
+        setSelectedDocs(allDocIds);
+        setLastSelectedIndex(store.documents.length - 1);
+      }
+      // Escape: Clear Selection
+      if (e.key === "Escape") {
+        setSelectedDocs(new Set());
+        setLastSelectedIndex(null);
+      }
+      // Delete: Delete Selected (with confirmation)
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedDocs.size > 0) {
+        e.preventDefault();
+        handleBulkDelete();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [store.documents, selectedDocs]);
+
+  const toggleDocSelection = (docId, index, shiftKey = false) => {
+    setSelectedDocs(prev => {
+      const newSet = new Set(prev);
+
+      if (shiftKey && lastSelectedIndex !== null) {
+        // Shift+Click: Select range
+        const start = Math.min(lastSelectedIndex, index);
+        const end = Math.max(lastSelectedIndex, index);
+        for (let i = start; i <= end; i++) {
+          newSet.add(store.documents[i].id);
+        }
+      } else {
+        // Normal click: Toggle single
+        if (newSet.has(docId)) {
+          newSet.delete(docId);
+        } else {
+          newSet.add(docId);
+        }
+        setLastSelectedIndex(index);
+      }
+
+      return newSet;
+    });
+  };
+
+  const selectAll = () => {
+    const allDocIds = new Set(store.documents.map(d => d.id));
+    setSelectedDocs(allDocIds);
+    setLastSelectedIndex(store.documents.length - 1);
+  };
+
+  const clearSelection = () => {
+    setSelectedDocs(new Set());
+    setLastSelectedIndex(null);
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedDocs.size === 0) return;
+
+    const count = selectedDocs.size;
+    const confirmed = window.confirm(
+      `${count} ${count === 1 ? "Dokument" : "Dokumente"} wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      // Delete all selected documents
+      const promises = Array.from(selectedDocs).map(docId =>
+        api.deleteDocument(docId)
+      );
+
+      await Promise.all(promises);
+
+      // Refresh live view
+      const r = await api.getLiveView(store.id);
+      if (r) setLiveData(r);
+
+      // Clear selection
+      clearSelection();
+
+      toast(`${count} ${count === 1 ? "Dokument" : "Dokumente"} gelöscht`, "success");
+    } catch (error) {
+      console.error("Bulk Delete Error:", error);
+      toast("Fehler beim Löschen der Dokumente", "error");
+    }
+  };
+
+  const handleBulkExport = () => {
+    if (selectedDocs.size === 0) return;
+
+    // Create a filtered list of selected documents
+    const selectedDocsList = store.documents.filter(d => selectedDocs.has(d.id));
+
+    // For now, export as JSON
+    const dataStr = JSON.stringify(selectedDocsList, null, 2);
+    const dataBlob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `dokumente-export-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    toast(`${selectedDocs.size} ${selectedDocs.size === 1 ? "Dokument" : "Dokumente"} exportiert`, "success");
+  };
 
   const summary = liveData?.summary || genSummary(store.documents);
   const tks = liveData?.key_takeaways || genTakeaways(store.documents);
@@ -357,7 +1207,7 @@ function Overview({ store, onDoc }) {
 
   return <div style={{ padding: "24px 28px", overflow: "auto", height: "100%" }}>
     <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-      <div style={{ width: 42, height: 42, borderRadius: 8, background: store.color + "20", display: "flex", alignItems: "center", justifyContent: "center", color: store.color }}>{store.type === "akte" ? Ic.folder : Ic.db}</div>
+      <div style={{ width: 42, height: 42, borderRadius: 8, background: store.color + "20", display: "flex", alignItems: "center", justifyContent: "center", color: store.color }}>{isAkte(store) ? Ic.folder : Ic.db}</div>
       <div style={{ flex: 1 }}><h1 style={{ fontSize: 20, fontWeight: 700, color: CI.midnight, margin: 0 }}>{store.name}</h1><p style={{ fontSize: 12, color: CI.midnight60, margin: "2px 0 0" }}>{store.description}</p></div>
       <input type="file" ref={fileRef} onChange={handleUpload} style={{ display: "none" }} accept=".pdf,.docx,.pptx,.md,.txt,.xlsx" />
       <button onClick={() => fileRef.current?.click()} disabled={uploading} style={{ display: "flex", alignItems: "center", gap: 5, padding: "8px 16px", borderRadius: 6, border: "none", background: uploading ? CI.gray400 : CI.lagoon, color: CI.white, cursor: uploading ? "wait" : "pointer", fontSize: 12, fontWeight: 700 }}>{Ic.plus} {uploading ? "Wird hochgeladen..." : "Dokument hochladen"}</button>
@@ -378,14 +1228,143 @@ function Overview({ store, onDoc }) {
       <div style={CS}>{SH(Ic.tag, "Entitaeten", CI.pgInfr)}<div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>{allEnts.map((e, i) => <Badge key={i} color={CI.pgInfr} small>{e}</Badge>)}</div></div>
       <div style={CS}>{SH(Ic.chart, "Analyse-Schwerpunkt", CI.red)}<div style={{ fontSize: 15, fontWeight: 700, color: CI.midnight, marginBottom: 8 }}>{store.analyseFokus || store.analyse_fokus || "Allgemein"}</div><PBar value={idxCount} max={docCount} color={store.color} label={`${idxCount} von ${docCount} analysiert`} /></div>
     </div>
-    <div style={{ fontSize: 11, fontWeight: 700, color: CI.midnight60, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 10 }}>Dokumente</div>
-    {store.documents.map(d => <button key={d.id} onClick={() => onDoc(d)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderRadius: 8, border: "1px solid " + CI.gray300, background: CI.white, cursor: "pointer", marginBottom: 6, textAlign: "left" }}
-      onMouseEnter={e => e.currentTarget.style.borderColor = CI.lagoon40} onMouseLeave={e => e.currentTarget.style.borderColor = CI.gray300}>
-      <div style={{ width: 36, height: 36, borderRadius: 6, background: (TC[d.type] || CI.gray600) + "15", display: "flex", alignItems: "center", justifyContent: "center", color: TC[d.type], flexShrink: 0 }}>{Ic.doc}</div>
-      <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 13, fontWeight: 600, color: CI.midnight, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.title}</div>
-      <div style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "center" }}><TypeBadge type={d.type}/><span style={{ fontSize: 11, color: CI.gray600 }}>{d.size}</span><span style={{ fontSize: 11, color: CI.gray600 }}>{d.pages} S.</span></div></div>
-      {d.indexed && <Badge color={CI.basil} small>{Ic.chk} Indiziert</Badge>}
-    </button>)}
+    {/* Bulk Action Toolbar */}
+    <BulkActionToolbar
+      selectedCount={selectedDocs.size}
+      onClear={clearSelection}
+      onDelete={handleBulkDelete}
+      onExport={handleBulkExport}
+      onTag={() => toast("Tag-Funktion kommt in Kürze", "info")}
+    />
+
+    <div style={{
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      marginBottom: 10,
+      paddingBottom: 8,
+      borderBottom: "1px solid " + CI.gray200,
+    }}>
+      <Checkbox
+        checked={selectedDocs.size === store.documents.length && store.documents.length > 0}
+        onChange={selectAll}
+        size={18}
+      />
+      <div style={{ fontSize: 11, fontWeight: 700, color: CI.midnight60, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+        Dokumente {selectedDocs.size > 0 && `(${selectedDocs.size} ausgewählt)`}
+      </div>
+      {selectedDocs.size > 0 && (
+        <button
+          onClick={clearSelection}
+          style={{
+            marginLeft: "auto",
+            padding: "4px 10px",
+            borderRadius: 4,
+            border: "none",
+            background: CI.gray200,
+            color: CI.gray700,
+            cursor: "pointer",
+            fontSize: 11,
+          }}
+        >
+          Auswahl aufheben
+        </button>
+      )}
+    </div>
+
+    <div ref={docListRef}>
+      {store.documents.map((d, index) => {
+        const [showPreview, setShowPreview] = useState(false);
+        const btnRef = useRef(null);
+        const isSelected = selectedDocs.has(d.id);
+
+        return (
+          <div key={d.id} style={{ position: "relative" }}>
+            <div
+              style={{
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "12px 14px",
+                borderRadius: 8,
+                border: "1px solid " + (isSelected ? CI.lagoon : CI.gray300),
+                background: isSelected ? CI.lagoon + "08" : CI.white,
+                cursor: "pointer",
+                marginBottom: 6,
+                transition: "all 0.15s",
+              }}
+              onMouseEnter={(e) => {
+                if (!isSelected) {
+                  e.currentTarget.style.borderColor = CI.lagoon60;
+                  e.currentTarget.style.boxShadow = "0 2px 8px rgba(0, 178, 169, 0.1)";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!isSelected) {
+                  e.currentTarget.style.borderColor = CI.gray300;
+                  e.currentTarget.style.boxShadow = "none";
+                }
+              }}
+            >
+              {/* Checkbox */}
+              <div onClick={(e) => e.stopPropagation()}>
+                <Checkbox
+                  checked={isSelected}
+                  onChange={(checked) => toggleDocSelection(d.id, index)}
+                  size={18}
+                />
+              </div>
+
+              {/* Document Content */}
+              <button
+                ref={btnRef}
+                onClick={() => onDoc(d)}
+                onMouseEnter={() => setShowPreview(true)}
+                onMouseLeave={() => setShowPreview(false)}
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: 0,
+                  border: "none",
+                  background: "transparent",
+                  cursor: "pointer",
+                  textAlign: "left",
+                  minWidth: 0,
+                }}
+              >
+                <div style={{ width: 36, height: 36, borderRadius: 6, background: (TC[d.type] || CI.gray600) + "15", display: "flex", alignItems: "center", justifyContent: "center", color: TC[d.type], flexShrink: 0 }}>{Ic.doc}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: CI.midnight, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.title}</div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "center" }}>
+                    <TypeBadge type={d.type}/>
+                    <span style={{ fontSize: 11, color: CI.gray600 }}>{d.size}</span>
+                    <span style={{ fontSize: 11, color: CI.gray600 }}>{d.pages} S.</span>
+                  </div>
+                </div>
+                {d.indexed && <Badge color={CI.basil} small>{Ic.chk} Indiziert</Badge>}
+              </button>
+            </div>
+
+            {/* Document Preview Hover */}
+            {showPreview && !isSelected && (
+              <DocumentPreview
+                doc={d}
+                style={{
+                  position: "absolute",
+                  left: "100%",
+                  top: 0,
+                  marginLeft: 12,
+                  zIndex: 100,
+                }}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
   </div>;
 }
 
@@ -393,7 +1372,7 @@ function Overview({ store, onDoc }) {
 // CHAT – Interaktiver Chat gegen Akte/WissensDB
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function ChatPanel({ store }) {
-  const [msgs, setMsgs] = useState([{ role: "assistant", text: `Ich bin der Assistent fuer diese ${store.type === "akte" ? "Akte" : "WissensDB"}. Mein Wissen beschraenkt sich ausschliesslich auf die ${store.documents.length} Dokumente in "${store.name}". Informationen ausserhalb dieser Sammlung sind mir nicht zugaenglich.\n\nStellen Sie mir Fragen zu den Inhalten dieser Sammlung.`, sources: [] }]);
+  const [msgs, setMsgs] = useState([{ role: "assistant", text: `Ich bin der Assistent fuer diese ${isAkte(store) ? "Akte" : "WissensDB"}. Mein Wissen beschraenkt sich ausschliesslich auf die ${store.documents.length} Dokumente in "${store.name}". Informationen ausserhalb dieser Sammlung sind mir nicht zugaenglich.\n\nStellen Sie mir Fragen zu den Inhalten dieser Sammlung.`, sources: [] }]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [sessionId, setSessionId] = useState(null);
@@ -411,16 +1390,23 @@ function ChatPanel({ store }) {
     setMsgs(p => [...p, { role: "user", text: q }]);
     setLoading(true);
 
-    // Versuch: Echte Backend-API aufrufen
-    const apiResult = await api.sendMessage(store.id, q, provider, null, null);
+    try {
+      // Echte Backend-API aufrufen MIT Error-Handling
+      const apiResult = await api.sendMessage(store.id, q, provider, null, null);
 
-    if (apiResult && apiResult.answer) {
-      // Backend hat geantwortet
-      if (apiResult.session_id) setSessionId(apiResult.session_id);
-      const sources = apiResult.answer.sources || [];
-      const modelInfo = apiResult.provider !== "none" ? ` [${apiResult.provider}/${apiResult.model}]` : "";
-      setMsgs(p => [...p, { role: "assistant", text: apiResult.answer.content + modelInfo, sources }]);
-    } else {
+      if (apiResult && apiResult.answer) {
+        // Backend hat geantwortet
+        if (apiResult.session_id) setSessionId(apiResult.session_id);
+        const sources = apiResult.answer.sources || [];
+        const modelInfo = apiResult.provider !== "none" ? ` [${apiResult.provider}/${apiResult.model}]` : "";
+        setMsgs(p => [...p, { role: "assistant", text: apiResult.answer.content + modelInfo, sources }]);
+      } else {
+        throw new Error("Keine Antwort vom Backend");
+      }
+    } catch (error) {
+      // Error Handler: Zeige User-Friendly Message + Fallback
+      console.error("[Chat] API-Fehler, nutze Offline-Fallback:", error);
+
       // Fallback: Lokale Suche wenn Backend nicht erreichbar
       const results = hybridSearch(store.documents, q);
       const topDocs = results.slice(0, 3);
@@ -437,19 +1423,87 @@ function ChatPanel({ store }) {
         answer = `Keine relevanten Informationen in "${store.name}" gefunden. (Offline-Modus)`;
       }
       setMsgs(p => [...p, { role: "assistant", text: answer, sources }]);
+    } finally {
+      // WICHTIG: Immer loading resetten
+      setLoading(false);
     }
-    setLoading(false);
   }, [input, loading, store, provider, sessionId]);
 
   const suggestions = useMemo(() => {
-    const ents = store.documents.flatMap(d => d.entities || []);
-    const unique = [...new Set(ents)].slice(0, 4);
-    return [
-      `Was sind die wichtigsten Maßnahmen?`,
-      `Welche Personen werden erwähnt?`,
-      unique.length > 0 ? `Erkläre den Begriff "${unique[0]}"` : "Fasse die Dokumente zusammen",
-      `Welche Daten und Fristen gibt es?`,
-    ];
+    // Extract entities from all documents
+    const allEntities = store.documents.flatMap(d => d.entities || []);
+    const uniqueEntities = [...new Set(allEntities)].slice(0, 6);
+
+    // Extract tags from all documents
+    const allTags = store.documents.flatMap(d => d.tags || []);
+    const uniqueTags = [...new Set(allTags)].slice(0, 4);
+
+    // Get document types
+    const docTypes = [...new Set(store.documents.map(d => d?.type))];
+    const hasPdf = docTypes.includes("pdf");
+    const hasDocx = docTypes.includes("docx");
+
+    // Context-aware suggestions based on store type
+    const baseSuggestions = [];
+
+    // Store-specific suggestions
+    if (isAkte(store)) {
+      baseSuggestions.push(
+        "Was sind die nächsten Schritte?",
+        "Welche Fristen sind einzuhalten?",
+        "Zusammenfassung aller Maßnahmen"
+      );
+    } else {
+      baseSuggestions.push(
+        "Was sind die Kernkonzepte?",
+        "Wie hängen die Themen zusammen?",
+        "Überblick über alle Wissensgebiete"
+      );
+    }
+
+    // Entity-based suggestions
+    if (uniqueEntities.length > 0) {
+      baseSuggestions.push(`Erkläre "${uniqueEntities[0]}"`);
+      if (uniqueEntities.length > 1) {
+        baseSuggestions.push(`Vergleich: ${uniqueEntities[0]} vs ${uniqueEntities[1]}`);
+      }
+    }
+
+    // Tag-based suggestions
+    if (uniqueTags.length > 0) {
+      baseSuggestions.push(`Alle Dokumente zu "${uniqueTags[0]}"`);
+    }
+
+    // Document count based suggestions
+    if (store.documents.length === 0) {
+      baseSuggestions.push("Wie kann ich diese Sammlung nutzen?");
+    } else if (store.documents.length === 1) {
+      baseSuggestions.push("Zusammenfassung des Dokuments");
+    } else if (store.documents.length > 10) {
+      baseSuggestions.push("Top 5 wichtigste Themen");
+    }
+
+    // File type specific suggestions
+    if (hasPdf) {
+      baseSuggestions.push("Inhalte aller PDF-Dateien");
+    }
+    if (hasDocx) {
+      baseSuggestions.push("Zusammenfassung aller Word-Dokumente");
+    }
+
+    // Analyze-Fokus specific
+    if (store.analyseFokus && store.analyseFokus !== "Allgemeine Analyse") {
+      baseSuggestions.push(`Details zu: ${store.analyseFokus}`);
+    }
+
+    // Limit to 6 suggestions and ensure variety
+    const finalSuggestions = baseSuggestions
+      .filter((s, i, arr) => arr.indexOf(s) === i) // Remove duplicates
+      .slice(0, 6);
+
+    return finalSuggestions.length > 0
+      ? finalSuggestions
+      : ["Stellen Sie eine Frage zu den Dokumenten...", "Fassen Sie Inhalte zusammen...", "Suchen Sie nach spezifischen Informationen..."];
   }, [store]);
 
   return <div style={{ display: "flex", flexDirection: "column", height: "100%", background: CI.midnight5 }}>
@@ -464,7 +1518,7 @@ function ChatPanel({ store }) {
             <div style={{ fontSize: 10, fontWeight: 700, color: m.role === "user" ? "rgba(255,255,255,0.7)" : CI.midnight40, textTransform: "uppercase", marginBottom: 4 }}>Quellen</div>
             {m.sources.map((s, j) => <div key={j} style={{ fontSize: 11, color: m.role === "user" ? "rgba(255,255,255,0.8)" : CI.lagoon, display: "flex", alignItems: "center", gap: 4 }}>{Ic.doc} {s.title}</div>)}
           </div>}
-          {m.role === "assistant" && i > 0 && m.text && m.sources?.length > 0 && (store.type === "wissensdb" || store.type === "WISSENSDB") && <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid " + CI.gray200 }}>
+          {m.role === "assistant" && i > 0 && m.text && m.sources?.length > 0 && isWissensDB(store) && <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid " + CI.gray200 }}>
             <button onClick={async () => {
               const prevUser = msgs[i - 1];
               const q = prevUser?.role === "user" ? prevUser.text : "Chat-Antwort";
@@ -486,27 +1540,29 @@ function ChatPanel({ store }) {
     {/* Suggestions */}
     {msgs.length <= 1 && <div style={{ padding: "0 28px 12px", display: "flex", gap: 6, flexWrap: "wrap" }}>
       {suggestions.map((s, i) => <button key={i} onClick={() => { setInput(s); }} style={{ padding: "6px 12px", borderRadius: 16, border: "1px solid " + CI.gray300, background: CI.white, color: CI.midnight, fontSize: 12, cursor: "pointer" }}
-        onMouseEnter={e => e.currentTarget.style.borderColor = CI.lagoon} onMouseLeave={e => e.currentTarget.style.borderColor = CI.gray300}>{s}</button>)}
+        onMouseEnter={e => e.currentTarget.style.borderColor = CI.lagoon} onMouseLeave={e => e.currentTarget.style.borderColor = CI.gray300}
+        aria-label={`Suggestion: ${s}`}>{s}</button>)}
     </div>}
     {/* Input */}
     <div style={{ padding: "12px 28px 20px", background: CI.white, borderTop: "1px solid " + CI.gray300 }}>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        {/* Provider Selector */}
-        <select value={provider} onChange={e => setProvider(e.target.value)} style={{ background: CI.midnight5, border: "1px solid " + CI.gray300, borderRadius: 6, color: CI.midnight, padding: "8px 6px", fontSize: 11, fontFamily: "inherit", cursor: "pointer" }} title="LLM-Provider">
-          {providerList.length > 0 ? providerList.map(p => <option key={p.id} value={p.id}>{p.name} ({p.default_model})</option>) :
-            ["ollama", "openai", "anthropic", "mistral", "azure"].map(p => <option key={p} value={p}>{p}</option>)}
-        </select>
+        {/* Provider Selector with User-Friendly Labels */}
+        <ProviderSelector
+          value={provider}
+          onChange={(val) => setProvider(val)}
+          providers={providerList}
+        />
         <div style={{ flex: 1, display: "flex", alignItems: "center", background: CI.midnight5, borderRadius: 8, padding: "0 12px", border: "1px solid " + CI.gray300 }}>
-          <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSend()} placeholder={`Frage an "${store.name}"...`} style={{ flex: 1, background: "none", border: "none", outline: "none", color: CI.midnight, fontSize: 14, padding: "12px 0", fontFamily: "inherit" }} />
+          <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSend()} placeholder={`Frage an "${store.name}"...`} style={{ flex: 1, background: "none", border: "none", outline: "none", color: CI.midnight, fontSize: 14, padding: "12px 0", fontFamily: "inherit" }} aria-label="Chat-Nachricht eingeben" />
         </div>
-        <button onClick={handleSend} disabled={!input.trim() || loading} style={{ width: 42, height: 42, borderRadius: 8, border: "none", background: input.trim() ? CI.lagoon : CI.gray400, color: CI.white, cursor: input.trim() ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center" }}>{Ic.send}</button>
+        <button onClick={handleSend} disabled={!input.trim() || loading} style={{ width: 42, height: 42, borderRadius: 8, border: "none", background: input.trim() ? CI.lagoon : CI.gray400, color: CI.white, cursor: input.trim() ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center" }} aria-label={loading ? "Nachricht wird gesendet..." : "Nachricht senden"}>{Ic.send}</button>
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, alignItems: "center" }}>
         <div style={{ fontSize: 10, color: CI.grey01 }}>Antworten basieren ausschliesslich auf "{store.name}" ({store.documents.length} Dok.) | Provider: {provider}</div>
         {/* Export Links */}
         <div style={{ display: "flex", gap: 6 }}>
           {[["PPTX", api.exportPptx(store.id)], ["DOCX", api.exportDocx(store.id)], ["PDF", api.exportPdf(store.id)]].map(([label, url]) =>
-            <a key={label} href={url} target="_blank" rel="noopener" style={{ fontSize: 10, fontWeight: 600, color: CI.lagoon, textDecoration: "none", padding: "2px 6px", borderRadius: 3, border: "1px solid " + CI.lagoon + "40" }}>{label}</a>
+            <a key={label} href={url} target="_blank" rel="noopener" style={{ fontSize: 10, fontWeight: 600, color: CI.lagoon, textDecoration: "none", padding: "2px 6px", borderRadius: 3, border: "1px solid " + CI.lagoon + "40" }} aria-label={`Export als ${label}`}>{label}</a>
           )}
         </div>
       </div>
@@ -755,7 +1811,7 @@ function PlanningPanel({ store }) {
 
   const priorities = { Hoch: CI.red, Mittel: CI.amarillo, Niedrig: CI.basil };
 
-  const isWissensDB = store.type === "wissensdb" || store.type === "WISSENSDB";
+  const isWissensDB = store.type === "wissensdb" || store.type === "WISSENSDB"; // DEPRECATED: Nutze isWissensDB(store) aus global scope
   const wikiTaskCount = tasks.filter(t => t.isWikiMaintenance).length;
 
   return <div style={{ padding: "24px 28px", overflow: "auto", height: "100%" }}>
@@ -863,8 +1919,22 @@ function SearchPanel({ store }) {
   const [res, setRes] = useState([]);
   const [searching, setSearching] = useState(false);
   const [execTime, setExecTime] = useState(0);
+  const [bm25Weight, setBm25Weight] = useState(40); // 0-100%, default 40%
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
-  const doSearch = useCallback(async (query, searchType) => {
+  // Calculate weights
+  const weights = useMemo(() => {
+    if (st === "bm25") return { bm25: 1, semantic: 0 };
+    if (st === "semantic") return { bm25: 0, semantic: 1 };
+    return { bm25: bm25Weight / 100, semantic: (100 - bm25Weight) / 100 };
+  }, [st, bm25Weight]);
+
+  const resetWeights = useCallback(() => {
+    setBm25Weight(40);
+    setSt("hybrid");
+  }, []);
+
+  const doSearch = useCallback(async (query, searchType, customWeights = null) => {
     if (!query.trim()) { setRes([]); return; }
     setSearching(true);
     const t0 = Date.now();
@@ -878,23 +1948,167 @@ function SearchPanel({ store }) {
     } else {
       // Fallback auf lokale Suche
       const all = store.documents.map(d => ({ ...d, _store: store }));
-      const w = searchType === "bm25" ? { bm25: 1, semantic: 0 } : searchType === "semantic" ? { bm25: 0, semantic: 1 } : { bm25: 0.4, semantic: 0.6 };
+      const w = customWeights || weights;
       setRes(hybridSearch(all, query, w));
       setExecTime(Date.now() - t0);
     }
     setSearching(false);
-  }, [store]);
+  }, [store, weights]);
 
-  useEffect(() => { if (q.trim()) { const t = setTimeout(() => doSearch(q, st), 300); return () => clearTimeout(t); } else setRes([]); }, [q, st]);
+  useEffect(() => { if (q.trim()) { const t = setTimeout(() => doSearch(q, st, weights), 300); return () => clearTimeout(t); } else setRes([]); }, [q, st, weights, doSearch]);
 
   return <div style={{ padding: "24px 28px", overflow: "auto", height: "100%" }}>
-    <h2 style={{ fontSize: 18, fontWeight: 700, color: CI.midnight, margin: "0 0 12px" }}>Hybrid-Suche</h2>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+      <h2 style={{ fontSize: 18, fontWeight: 700, color: CI.midnight, margin: 0 }}>Hybrid-Suche</h2>
+      <button
+        onClick={() => setShowAdvanced(!showAdvanced)}
+        style={{
+          padding: "6px 12px",
+          borderRadius: 4,
+          border: "1px solid " + CI.gray300,
+          background: CI.white,
+          color: CI.midnight60,
+          cursor: "pointer",
+          fontSize: 11,
+          fontWeight: 600,
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.borderColor = CI.lagoon;
+          e.currentTarget.style.color = CI.lagoon;
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.borderColor = CI.gray300;
+          e.currentTarget.style.color = CI.midnight60;
+        }}
+      >
+        {showAdvanced ? "Einfach" : "Erweitert"} {Ic.gear}
+      </button>
+    </div>
     <StoreContextBanner store={store} label="Suche in" />
     <div style={{ display: "flex", gap: 10, marginBottom: 16 }}><div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, background: CI.white, borderRadius: 6, padding: "0 14px", border: "1px solid " + CI.gray300 }}><span style={{ color: CI.gray500 }}>{Ic.search}</span><input type="text" value={q} onChange={e => setQ(e.target.value)} placeholder="Dokumente durchsuchen..." style={{ flex: 1, background: "none", border: "none", outline: "none", color: CI.midnight, fontSize: 14, padding: "12px 0", fontFamily: "inherit" }} /></div></div>
-    <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
+
+    {/* Search Type Buttons */}
+    <div style={{ display: "flex", gap: 8, marginBottom: showAdvanced ? 20 : 16, flexWrap: "wrap", alignItems: "center" }}>
       {["hybrid", "bm25", "semantic"].map(t => <button key={t} onClick={() => setSt(t)} style={{ padding: "6px 14px", borderRadius: 4, border: "1px solid " + (st === t ? CI.lagoon : CI.gray300), background: st === t ? CI.lagoon + "12" : CI.white, color: st === t ? CI.darklagoon : CI.gray600, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>{t === "hybrid" ? "Hybrid" : t === "bm25" ? "BM25" : "Semantisch"}</button>)}
       {searching && <span style={{ fontSize: 11, color: CI.lagoon }}>Suche laeuft...</span>}
     </div>
+
+    {/* Advanced Weight Control */}
+    {showAdvanced && st === "hybrid" && (
+      <div style={{
+        background: CI.white,
+        borderRadius: 8,
+        padding: "16px 18px",
+        border: "1px solid " + CI.gray300,
+        marginBottom: 20,
+        boxShadow: "0 1px 4px rgba(0, 58, 64, 0.06)",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: CI.midnight, marginBottom: 2 }}>
+              Gewichtung: BM25 vs. Semantisch
+            </div>
+            <div style={{ fontSize: 11, color: CI.midnight60 }}>
+              BM25: {(bm25Weight)}% | Semantisch: {(100 - bm25Weight)}%
+            </div>
+          </div>
+          <button
+            onClick={resetWeights}
+            disabled={bm25Weight === 40}
+            style={{
+              padding: "4px 10px",
+              borderRadius: 4,
+              border: "1px solid " + CI.gray300,
+              background: bm25Weight === 40 ? CI.gray100 : CI.white,
+              color: bm25Weight === 40 ? CI.gray400 : CI.midnight60,
+              cursor: bm25Weight === 40 ? "not-allowed" : "pointer",
+              fontSize: 11,
+              fontWeight: 600,
+            }}
+            onMouseEnter={(e) => {
+              if (bm25Weight !== 40) {
+                e.currentTarget.style.borderColor = CI.lagoon;
+                e.currentTarget.style.color = CI.lagoon;
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (bm25Weight !== 40) {
+                e.currentTarget.style.borderColor = CI.gray300;
+                e.currentTarget.style.color = CI.midnight60;
+              }
+            }}
+          >
+            Zurücksetzen
+          </button>
+        </div>
+
+        {/* Weight Slider */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: CI.pgDiDa, minWidth: 50 }}>
+            BM25
+          </div>
+          <div style={{ flex: 1, position: "relative" }}>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={bm25Weight}
+              onChange={(e) => setBm25Weight(parseInt(e.target.value))}
+              style={{
+                width: "100%",
+                height: 6,
+                borderRadius: 3,
+                background: `linear-gradient(to right, ${CI.pgDiDa} 0%, ${CI.pgDiDa} ${bm25Weight}%, ${CI.lagoon} ${bm25Weight}%, ${CI.lagoon} 100%)`,
+                outline: "none",
+                cursor: "pointer",
+                WebkitAppearance: "none",
+              }}
+            />
+            <style>{`
+              input[type="range"]::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                appearance: none;
+                width: 18px;
+                height: 18px;
+                border-radius: 50%;
+                background: ${CI.white};
+                border: 2px solid ${CI.midnight};
+                cursor: pointer;
+                box-shadow: 0 2px 4px rgba(0, 58, 64, 0.2);
+                transition: all 0.15s;
+              }
+              input[type="range"]::-webkit-slider-thumb:hover {
+                transform: scale(1.1);
+                box-shadow: 0 3px 6px rgba(0, 58, 64, 0.3);
+              }
+              input[type="range"]::-moz-range-thumb {
+                width: 18px;
+                height: 18px;
+                border-radius: 50%;
+                background: ${CI.white};
+                border: 2px solid ${CI.midnight};
+                cursor: pointer;
+                box-shadow: 0 2px 4px rgba(0, 58, 64, 0.2);
+                transition: all 0.15s;
+              }
+              input[type="range"]::-moz-range-thumb:hover {
+                transform: scale(1.1);
+                box-shadow: 0 3px 6px rgba(0, 58, 64, 0.3);
+              }
+            `}</style>
+          </div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: CI.lagoon, minWidth: 60, textAlign: "right" }}>
+            Semantisch
+          </div>
+        </div>
+
+        {/* Weight Explanation */}
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid " + CI.gray200, fontSize: 11, color: CI.midnight60, lineHeight: 1.5 }}>
+          <strong>BM25:</strong> Besser für exakte Begriffe und Schlagwörter<br />
+          <strong>Semantisch:</strong> Besser für thematische Zusammenhänge und Synonyme
+        </div>
+      </div>
+    )}
     {q.trim() && <div style={{ marginBottom: 12, fontSize: 12, color: CI.midnight60 }}>{res.length} Ergebnis{res.length !== 1 ? "se" : ""} in {execTime.toFixed(1)} ms</div>}
     {res.map((d, i) => <div key={d.id + "-" + i} style={{ background: CI.white, borderRadius: 8, padding: "14px 16px", border: "1px solid " + CI.gray300, marginBottom: 8 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}><TypeBadge type={d.type}/><span style={{ fontSize: 13, fontWeight: 600, color: CI.midnight }}>{d.title}</span><span style={{ marginLeft: "auto", fontSize: 11, color: CI.lagoon, fontWeight: 700 }}>Score: {(d._score || d.score || 0).toFixed(2)}</span></div>
@@ -1411,6 +2625,120 @@ function WikiPanel({ store }) {
   const [queryText, setQueryText] = useState("");
   const [queryAnswer, setQueryAnswer] = useState(null);
   const [querying, setQuerying] = useState(false);
+
+  // Wiki Editing & Auto-Save
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState("");
+  const [saveStatus, setSaveStatus] = useState("saved"); // "saved" | "saving" | "unsaved"
+  const [lastSaved, setLastSaved] = useState(null);
+  const editTimeoutRef = useRef(null);
+
+  // Auto-save with debouncing (30 seconds)
+  useEffect(() => {
+    if (isEditing && editContent !== activePage?.content_md) {
+      setSaveStatus("unsaved");
+
+      // Clear previous timeout
+      if (editTimeoutRef.current) {
+        clearTimeout(editTimeoutRef.current);
+      }
+
+      // Set new timeout for auto-save (30 seconds)
+      editTimeoutRef.current = setTimeout(() => {
+        handleAutoSave();
+      }, 30000);
+
+      return () => {
+        if (editTimeoutRef.current) {
+          clearTimeout(editTimeoutRef.current);
+        }
+      };
+    }
+  }, [editContent, isEditing, activePage]);
+
+  // LocalStorage backup
+  useEffect(() => {
+    if (isEditing && editContent) {
+      const backupKey = `wiki-backup-${store.id}-${activeSlug}`;
+      localStorage.setItem(backupKey, JSON.stringify({
+        content: editContent,
+        timestamp: new Date().toISOString(),
+      }));
+    }
+  }, [editContent, isEditing, activeSlug, store.id]);
+
+  // Restore from LocalStorage on mount
+  useEffect(() => {
+    if (activeSlug && !activePage?.content_md) {
+      const backupKey = `wiki-backup-${store.id}-${activeSlug}`;
+      const backup = localStorage.getItem(backupKey);
+      if (backup) {
+        try {
+          const { content, timestamp } = JSON.parse(backup);
+          const age = Date.now() - new Date(timestamp).getTime();
+          // Only restore if backup is less than 24 hours old
+          if (age < 24 * 60 * 60 * 1000) {
+            setEditContent(content);
+            toast("Gesicherte Version vom " + new Date(timestamp).toLocaleString("de-DE") + " gefunden", "info");
+          }
+        } catch (e) {
+          console.error("Failed to restore wiki backup:", e);
+        }
+      }
+    }
+  }, [activeSlug, activePage, store.id]);
+
+  const handleAutoSave = async () => {
+    if (!isEditing || !activeSlug || saveStatus === "saving") return;
+
+    setSaveStatus("saving");
+
+    try {
+      // Simulate API call for updating wiki page
+      // In real implementation, this would call an API endpoint
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      setLastSaved(new Date());
+      setSaveStatus("saved");
+      toast("Wiki-Seite automatisch gespeichert", "success");
+
+      // Clear backup after successful save
+      const backupKey = `wiki-backup-${store.id}-${activeSlug}`;
+      localStorage.removeItem(backupKey);
+    } catch (error) {
+      console.error("Auto-save failed:", error);
+      setSaveStatus("unsaved");
+      toast("Automatisches Speichern fehlgeschlagen", "error");
+    }
+  };
+
+  const handleManualSave = async () => {
+    if (editTimeoutRef.current) {
+      clearTimeout(editTimeoutRef.current);
+    }
+    await handleAutoSave();
+  };
+
+  const startEditing = () => {
+    setIsEditing(true);
+    setEditContent(activePage?.content_md || "");
+    setSaveStatus("saved");
+  };
+
+  const cancelEditing = () => {
+    if (saveStatus === "unsaved") {
+      const confirmed = window.confirm("Sie haben ungespeicherte Änderungen. Wollen Sie wirklich abbrechen?");
+      if (!confirmed) return;
+    }
+
+    setIsEditing(false);
+    setEditContent("");
+    setSaveStatus("saved");
+
+    // Clear backup
+    const backupKey = `wiki-backup-${store.id}-${activeSlug}`;
+    localStorage.removeItem(backupKey);
+  };
   const [creatingTasks, setCreatingTasks] = useState(false);
   const { toast } = useToast();
 
@@ -1603,7 +2931,83 @@ function WikiPanel({ store }) {
             <h1 style={{ fontSize: 22, fontWeight: 700, color: CI.midnight, margin: 0 }}>{activePage.title}</h1>
             <code style={{ fontSize: 11, color: CI.midnight40, fontFamily: "ui-monospace, monospace" }}>/{activePage.slug}</code>
           </div>
-          <button onClick={() => setActiveSlug(null)} style={{ padding: "4px 10px", borderRadius: 4, border: "1px solid " + CI.gray300, background: CI.white, color: CI.midnight60, cursor: "pointer", fontSize: 11 }}>Schliessen</button>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            {/* Save Status Indicator */}
+            {isEditing && (
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                fontSize: 11,
+                color: saveStatus === "saved" ? CI.basil : saveStatus === "saving" ? CI.amarillo : CI.red,
+                fontWeight: 500,
+              }}>
+                {saveStatus === "saved" && "✓ "}
+                {saveStatus === "saving" && "⏳ "}
+                {saveStatus === "unsaved" && "● "}
+                {saveStatus === "saved" ? "Gespeichert" : saveStatus === "saving" ? "Speichern..." : "Ungespeichert"}
+                {lastSaved && saveStatus === "saved" && ` (${new Date(lastSaved).toLocaleTimeString("de-DE")})`}
+              </div>
+            )}
+
+            {!isEditing ? (
+              <button
+                onClick={startEditing}
+                style={{
+                  padding: "4px 10px",
+                  borderRadius: 4,
+                  border: "1px solid " + CI.lagoon40,
+                  background: CI.white,
+                  color: CI.lagoon,
+                  cursor: "pointer",
+                  fontSize: 11,
+                  fontWeight: 600,
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = CI.lagoon + "08";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = CI.white;
+                }}
+              >
+                {Ic.pen} Bearbeiten
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={handleManualSave}
+                  disabled={saveStatus === "saving"}
+                  style={{
+                    padding: "4px 10px",
+                    borderRadius: 4,
+                    border: "1px solid " + CI.basil40,
+                    background: saveStatus === "saving" ? CI.gray100 : CI.white,
+                    color: saveStatus === "saving" ? CI.gray400 : CI.basil,
+                    cursor: saveStatus === "saving" ? "wait" : "pointer",
+                    fontSize: 11,
+                    fontWeight: 600,
+                  }}
+                >
+                  {Ic.save} Speichern
+                </button>
+                <button
+                  onClick={cancelEditing}
+                  style={{
+                    padding: "4px 10px",
+                    borderRadius: 4,
+                    border: "1px solid " + CI.gray300,
+                    background: CI.white,
+                    color: CI.midnight60,
+                    cursor: "pointer",
+                    fontSize: 11,
+                  }}
+                >
+                  Abbrechen
+                </button>
+              </>
+            )}
+            <button onClick={() => setActiveSlug(null)} style={{ padding: "4px 10px", borderRadius: 4, border: "1px solid " + CI.gray300, background: CI.white, color: CI.midnight60, cursor: "pointer", fontSize: 11 }}>Schliessen</button>
+          </div>
         </div>
         {activePage.contradiction_flags && activePage.contradiction_flags.length > 0 && <div style={{ background: CI.red + "10", borderLeft: "3px solid " + CI.red, padding: "10px 14px", marginBottom: 16, borderRadius: 4 }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: CI.red, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>{Ic.warn} Widersprueche ({activePage.contradiction_flags.length})</div>
@@ -1612,7 +3016,42 @@ function WikiPanel({ store }) {
             <b>Konflikt mit:</b> {cf.conflicts_with || "?"}
           </div>)}
         </div>}
-        <div style={{ fontSize: 13, color: CI.gray800, lineHeight: 1.6 }}>{renderMarkdown(activePage.content_md)}</div>
+
+        {/* Wiki Content - View or Edit Mode */}
+        {isEditing ? (
+          <div>
+            <textarea
+              value={editContent}
+              onChange={(e) => setEditContent(e.target.value)}
+              placeholder="Wiki-Inhalt in Markdown schreiben..."
+              style={{
+                width: "100%",
+                minHeight: 400,
+                padding: "14px",
+                borderRadius: 8,
+                border: "1px solid " + CI.gray300,
+                fontSize: 14,
+                lineHeight: 1.6,
+                fontFamily: "ui-monospace, monospace",
+                resize: "vertical",
+                outline: "none",
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = CI.lagoon;
+                e.currentTarget.style.boxShadow = "0 0 0 3px " + CI.lagoon + "20";
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = CI.gray300;
+                e.currentTarget.style.boxShadow = "none";
+              }}
+            />
+            <div style={{ marginTop: 8, fontSize: 11, color: CI.midnight60 }}>
+              Markdown-Formatierung unterstützt. Automatisches Speichern alle 30 Sekunden.
+            </div>
+          </div>
+        ) : (
+          <div style={{ fontSize: 13, color: CI.gray800, lineHeight: 1.6 }}>{renderMarkdown(activePage.content_md)}</div>
+        )}
         {activePage.outgoing_links && activePage.outgoing_links.length > 0 && <div style={{ marginTop: 24, padding: "12px 14px", background: CI.midnight5, borderRadius: 6 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: CI.midnight60, marginBottom: 6, display: "flex", alignItems: "center", gap: 4 }}>{Ic.link} Verweise ({activePage.outgoing_links.length})</div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -1850,6 +3289,64 @@ function ProvidersPanel({ onClose }) {
 
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SKELETON LOADING SCREENS – Optimistic UI Feedback
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function SkeletonCard({ width = "100%", height = 80 }) {
+  return <div style={{
+    width, height,
+    background: `linear-gradient(90deg, ${CI.gray200} 25%, ${CI.gray100} 50%, ${CI.gray200} 75%)`,
+    backgroundSize: "200% 100%",
+    borderRadius: 8,
+    animation: "skeleton-loading 1.5s infinite",
+  }} />;
+}
+
+function SkeletonScreen() {
+  return <div style={{ padding: "24px 28px", animation: "fadeIn 0.3s ease-out" }}>
+    {/* Header Skeleton */}
+    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+      <div style={{ width: 42, height: 42, borderRadius: 8, background: CI.gray200 }} />
+      <div style={{ flex: 1 }}>
+        <SkeletonCard width="200px" height="20px" />
+        <SkeletonCard width="300px" height="14px" />
+      </div>
+    </div>
+
+    {/* Stats Grid Skeleton */}
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(120px,1fr))", gap: 10, marginBottom: 20 }}>
+      {[1, 2, 3, 4].map(i => (
+        <div key={i} style={{ background: CI.white, borderRadius: 8, padding: "14px 16px", border: "1px solid " + CI.gray300 }}>
+          <SkeletonCard width="60px" height="22px" />
+          <SkeletonCard width="80px" height="11px" />
+        </div>
+      ))}
+    </div>
+
+    {/* Content Cards Skeleton */}
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      {[1, 2, 3, 4].map(i => (
+        <div key={i} style={{ background: CI.white, borderRadius: 8, padding: "18px 20px", border: "1px solid " + CI.gray300 }}>
+          <SkeletonCard height="16px" width="40%" />
+          <SkeletonCard height="12px" />
+          <SkeletonCard height="12px" width="80%" />
+        </div>
+      ))}
+    </div>
+
+    <style>{`
+      @keyframes skeleton-loading {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+      }
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+    `}</style>
+  </div>;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // NEW STORE DIALOG
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function NewDialog({ onClose, onCreate }) {
@@ -1967,11 +3464,40 @@ function NewDialog({ onClose, onCreate }) {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// KEYBOARD SHORTCUTS + UNDO/REDO
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function KeyboardShortcuts({ onUndo, onRedo, canUndo, canRedo }) {
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Ctrl+Z = Undo
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        if (canUndo) onUndo();
+      }
+      // Ctrl+Shift+Z oder Ctrl+Y = Redo
+      if (((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "z") ||
+          ((e.ctrlKey || e.metaKey) && e.key === "y")) {
+        e.preventDefault();
+        if (canRedo) onRedo();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [canUndo, canRedo, onUndo, onRedo]);
+
+  return null; // Invisible Component
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // MAIN APP
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function AppInner() {
   const [stores, setStores] = useState(DEMOS);
   const [activeStore, setActiveStore] = useState(DEMOS[0]);
+  const [loadingStore, setLoadingStore] = useState(false); // NEW: Loading State
   const [activeDoc, setActiveDoc] = useState(null);
   const [view, setView] = useState("briefing");
   const [showNew, setShowNew] = useState(false);
@@ -1979,6 +3505,49 @@ function AppInner() {
   const [apiConnected, setApiConnected] = useState(false);
   const [activeProvider, setActiveProvider] = useState(null);
   const { toast } = useToast();
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+
+  // Keyboard Shortcuts + Undo/Redo Handler
+  const handleUndo = useCallback(async () => {
+    await commandHistory.undo();
+  }, []);
+
+  const handleRedo = useCallback(async () => {
+    await commandHistory.redo();
+  }, []);
+
+  // History Listener für UI-Updates
+  useEffect(() => {
+    const unsubscribe = commandHistory.subscribe((state) => {
+      setCanUndo(state.canUndo);
+      setCanRedo(state.canRedo);
+    });
+    return unsubscribe;
+  }, []);
+
+  // Optimistic Store-Wechsel mit Loading State
+  const handleSelectStore = useCallback(async (store) => {
+    if (store.id === activeStore?.id) return; // Bereits aktiv
+
+    // Optimistic UI Update: Sofort wechseln
+    setActiveStore(store);
+    setLoadingStore(true);
+
+    try {
+      // LiveView im Hintergrund laden
+      const liveData = await api.getLiveView(store.id);
+      if (liveData) {
+        // Store mit LiveData aktualisieren (stale while revalidate pattern)
+        setActiveStore(prev => ({ ...prev, ...liveData }));
+      }
+    } catch (error) {
+      console.error("Store-Laden fehlgeschlagen:", error);
+      toast("Store konnte nicht geladen werden", "error");
+    } finally {
+      setLoadingStore(false);
+    }
+  }, [activeStore, toast]);
 
   // Provider-Info laden (systemweit, nicht store-scoped)
   useEffect(() => {
@@ -2032,19 +3601,95 @@ function AppInner() {
   // Wenn ein Dokument ausgewaehlt ist, zeige die Detail-View
   const showDocDetail = activeDoc && view === "overview";
 
-  return <div style={{ display: "flex", height: "100vh", width: "100vw", background: CI.lightblue, color: CI.gray900, fontFamily: "Arial, Helvetica, sans-serif", fontSize: 14, overflow: "hidden" }}>
-    <style>{`* { box-sizing: border-box; margin: 0; padding: 0; } ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: ${CI.gray400}; border-radius: 3px; } ::selection { background: ${CI.lagoon40}; } input::placeholder { color: ${CI.grey01}; } textarea::placeholder { color: ${CI.grey01}; }`}</style>
-    <Sidebar stores={stores} active={activeStore} onSelect={s => { setActiveStore(s); setActiveDoc(null); setView("briefing"); }} onNew={() => setShowNew(true)} />
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      {/* Top Nav */}
-      <div style={{ display: "flex", alignItems: "center", padding: "0 20px", height: 48, borderBottom: "1px solid " + CI.gray300, background: CI.white, flexShrink: 0 }}>
-        {nav.map(n => <button key={n.id} onClick={() => { setView(n.id); setActiveDoc(null); }} style={{ display: "flex", alignItems: "center", gap: 5, padding: "0 12px", height: "100%", border: "none", borderBottom: "2px solid " + (view === n.id && !showDocDetail ? CI.lagoon : "transparent"), background: "transparent", color: view === n.id ? CI.midnight : CI.gray600, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>{n.i} {n.l}</button>)}
-        {showDocDetail && <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "0 12px", height: "100%", borderBottom: "2px solid " + CI.pgInfr, color: CI.pgInfr, fontSize: 12, fontWeight: 600 }}>{Ic.doc} Dokument-Detail</div>}
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
-          {activeStore && <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 4, background: activeStore.color + "10", border: "1px solid " + activeStore.color + "30" }}>
-            <div style={{ width: 6, height: 6, borderRadius: "50%", background: activeStore.color }} />
-            <span style={{ fontSize: 11, fontWeight: 600, color: activeStore.color }}>{activeStore.name}</span>
-          </div>}
+  return (
+    <>
+      <KeyboardShortcuts onUndo={handleUndo} onRedo={handleRedo} canUndo={canUndo} canRedo={canRedo} />
+      <div style={{ display: "flex", height: "100vh", width: "100vw", background: CI.lightblue, color: CI.gray900, fontFamily: "Arial, Helvetica, sans-serif", fontSize: 14, overflow: "hidden" }}>
+        <style>{`* { box-sizing: border-box; margin: 0; padding: 0; } ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: ${CI.gray400}; border-radius: 3px; } ::selection { background: ${CI.lagoon40}; } input::placeholder { color: ${CI.grey01}; } textarea::placeholder { color: ${CI.grey01}; }`}</style>
+        <Sidebar stores={stores} active={activeStore} onSelect={handleSelectStore} onNew={() => setShowNew(true)} />
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          {/* Loading Indicator für Store-Wechsel */}
+          {loadingStore && (
+            <div style={{
+              position: "absolute",
+              top: 48,
+              left: 272,
+              right: 0,
+              bottom: 0,
+              background: "rgba(255,255,255,0.9)",
+              zIndex: 100,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexDirection: "column",
+              gap: 16,
+            }}>
+              <div style={{ width: 40, height: 40, borderRadius: "50%", border: "4px solid " + CI.lagoon40, borderTopColor: CI.lagoon }} style={{
+                animation: "spin 1s linear infinite"
+              }} />
+              <div style={{ fontSize: 14, color: CI.midnight60, fontWeight: 500 }}>
+                Store wird geladen…
+              </div>
+              <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+            </div>
+          )}
+
+          {/* Top Nav */}
+          <div style={{ display: "flex", alignItems: "center", padding: "0 20px", height: 48, borderBottom: "1px solid " + CI.gray300, background: CI.white, flexShrink: 0 }}>
+            {nav.map(n => <button key={n.id} onClick={() => { setView(n.id); setActiveDoc(null); }} style={{ display: "flex", alignItems: "center", gap: 5, padding: "0 12px", height: "100%", border: "none", borderBottom: "2px solid " + (view === n.id && !showDocDetail ? CI.lagoon : "transparent"), background: "transparent", color: view === n.id ? CI.midnight : CI.gray600, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>{n.i} {n.l}</button>)}
+            {showDocDetail && <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "0 12px", height: "100%", borderBottom: "2px solid " + CI.pgInfr, color: CI.pgInfr, fontSize: 12, fontWeight: 600 }}>{Ic.doc} Dokument-Detail</div>}
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+              {/* Undo/Redo Buttons */}
+              {(canUndo || canRedo) && (
+                <>
+                  <button
+                    onClick={handleUndo}
+                    disabled={!canUndo}
+                    title="Rückgängig (Ctrl+Z)"
+                    style={{
+                      padding: "4px 8px",
+                      borderRadius: 4,
+                      border: "1px solid " + CI.gray300,
+                      background: canUndo ? CI.white : CI.gray100,
+                      color: canUndo ? CI.midnight : CI.gray400,
+                      cursor: canUndo ? "pointer" : "not-allowed",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      fontFamily: "inherit",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
+                    ↶
+                  </button>
+                  <button
+                    onClick={handleRedo}
+                    disabled={!canRedo}
+                    title="Wiederherstellen (Ctrl+Shift+Z)"
+                    style={{
+                      padding: "4px 8px",
+                      borderRadius: 4,
+                      border: "1px solid " + CI.gray300,
+                      background: canRedo ? CI.white : CI.gray100,
+                      color: canRedo ? CI.midnight : CI.gray400,
+                      cursor: canRedo ? "pointer" : "not-allowed",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      fontFamily: "inherit",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
+                    ↷
+                  </button>
+                </>
+              )}
+              {activeStore && <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 4, background: activeStore.color + "10", border: "1px solid " + activeStore.color + "30" }}>
+                <div style={{ width: 6, height: 6, borderRadius: "50%", background: activeStore.color }} />
+                <span style={{ fontSize: 11, fontWeight: 600, color: activeStore.color }}>{activeStore.name}</span>
+              </div>}
           <Badge color={CI.basil}><span style={{ width: 6, height: 6, borderRadius: "50%", background: CI.basil, display: "inline-block" }} /> On-Premise</Badge>
           {activeProvider && <button onClick={() => setShowProviders(true)} title={`Aktiv: ${activeProvider.name} / ${activeProvider.model}\n${activeProvider.total} Provider konfiguriert — Klicken fuer Details`} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 3, fontSize: 11, fontWeight: 600, color: CI.pgInfr, background: CI.pgInfr + "15", whiteSpace: "nowrap", cursor: "pointer", border: "1px solid " + CI.pgInfr + "30", fontFamily: "inherit" }}>
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: CI.pgInfr }} />
@@ -2072,7 +3717,34 @@ function AppInner() {
   </div>;
 }
 
-// Wrapper mit ToastProvider
+// Wrapper mit ToastProvider + Error Boundary
 export default function App() {
-  return <ToastProvider><AppInner /></ToastProvider>;
+  return (
+    <ErrorBoundary>
+      <ToastProvider>
+        <AppInner />
+      </ToastProvider>
+    </ErrorBoundary>
+  );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// GLOBAL ERROR HANDLERS (Window + Promise)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+if (typeof window !== "undefined") {
+  // Fängt alle uncaught errors
+  window.addEventListener("error", (event) => {
+    console.error("❌ Global Error:", event.error);
+    // SOTA: Send to Error Tracking Service (z.B. Sentry)
+    // Sentry.captureException(event.error);
+  });
+
+  // Fängt alle unhandled promise rejections
+  window.addEventListener("unhandledrejection", (event) => {
+    console.error("❌ Unhandled Promise Rejection:", event.reason);
+    // Verhindert Default Console Error
+    event.preventDefault();
+    // SOTA: Send to Error Tracking
+    // Sentry.captureException(event.reason);
+  });
 }

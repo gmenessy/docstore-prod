@@ -73,6 +73,11 @@ async def lifespan(app: FastAPI):
     # Shutdown
     from app.core.llm_client import llm_client
     await llm_client.close()
+
+    # Ingestion-Executor sauber herunterfahren
+    from app.services.ingestion_service import shutdown_executor
+    await shutdown_executor()
+
     logger.info("Server wird heruntergefahren…")
 
 

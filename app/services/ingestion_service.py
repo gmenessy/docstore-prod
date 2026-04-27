@@ -8,6 +8,7 @@ import logging
 import shutil
 from pathlib import Path
 from typing import AsyncGenerator
+from concurrent.futures import ThreadPoolExecutor
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +25,20 @@ from app.ingestion.ner import extract_entities
 from app.search.engine import search_engine
 
 logger = logging.getLogger(__name__)
+
+# ─── Thread-Pool fuer CPU-intensive Aufgaben ───
+# Max 4 parallele Extraktionen/Chunking/NER Tasks
+# Verhindert Thread-Exhaustion bei vielen Uploads
+_executor = ThreadPoolExecutor(
+    max_workers=4,
+    thread_name_prefix="ingest",
+)
+
+
+async def shutdown_executor():
+    """Executor sauber herunterfahren (bei Shutdown)."""
+    _executor.shutdown(wait=True)
+    logger.info("Ingestion-Executor heruntergefahren")
 
 
 async def ingest_document(
@@ -71,7 +86,7 @@ async def ingest_document(
             # Extraktion in Thread-Pool (blockierende I/O)
             loop = asyncio.get_event_loop()
             extraction: ExtractionResult = await loop.run_in_executor(
-                None, extractor.extract, file_path
+                _executor, extractor.extract, file_path
             )
 
             if extraction.errors:
@@ -118,7 +133,7 @@ async def ingest_document(
         yield {"step": "chunking", "progress": 0.40, "message": "Adaptives Chunking…"}
 
         chunk_results = await loop.run_in_executor(
-            None, chunk_text, extraction.text
+            _executor, chunk_text, extraction.text
         )
 
         db_chunks = []
@@ -164,7 +179,7 @@ async def ingest_document(
         yield {"step": "ner", "progress": 0.65, "message": "Entitäten-Extraktion (NER)…"}
 
         entities = await loop.run_in_executor(
-            None, extract_entities, extraction.text
+            _executor, extract_entities, extraction.text
         )
 
         db_entities = []
@@ -198,7 +213,7 @@ async def ingest_document(
 
         from app.services.intelligence import generate_summary
         document.content_summary = await loop.run_in_executor(
-            None, generate_summary, [extraction.text]
+            _executor, generate_summary, [extraction.text]
         )
 
         # ── Schritt 6: Suchindex aktualisieren (thread-safe unter Lock) ──
@@ -270,10 +285,10 @@ async def reindex_all(db: AsyncSession):
                 "tags": doc.tags or [],
             })
 
-    async with search_engine._lock:
-        search_engine._corpus.clear()
-        search_engine.add_chunks(all_chunks)
-        search_engine.rebuild_index()
+    # Lock wird intern von add_chunks/rebuild_index verwaltet
+    search_engine._corpus.clear()  # Direct access für clear (schneller)
+    await search_engine.add_chunks(all_chunks)
+    await search_engine.rebuild_index()
 
     logger.info(f"Reindexierung abgeschlossen: {len(all_chunks)} Chunks aus {len(documents)} Dokumenten")
     return len(all_chunks)

@@ -216,9 +216,9 @@ async def delete_document(document_id: str, db: AsyncSession = Depends(get_db), 
     if file_path.exists():
         file_path.unlink()
 
-    # Aus Suchindex entfernen
+    # Aus Suchindex entfernen (Thread-Safe mit Lock)
     from app.search.engine import search_engine
-    search_engine.remove_document(document_id)
+    await search_engine.remove_document(document_id)
 
     await db.delete(document)
     await db.commit()

@@ -91,10 +91,61 @@ async def _get_or_create_page(
         content_md="",
         outgoing_links=[],
         source_documents=[],
+        version=1,  # Initial Version
+        edited_by="system",
+        edit_reason="Seite erstellt",
     )
     db.add(page)
     await db.flush()
     return page, True
+
+
+async def _update_wiki_page(
+    db: AsyncSession,
+    page: WikiPage,
+    content_md: str,
+    title: str = None,
+    edited_by: str = "system",
+    edit_reason: str = "Update",
+    expected_version: int = None,
+) -> WikiPage:
+    """
+    Wiki-Seite mit Optimistic Locking aktualisieren.
+
+    Args:
+        page: Zu aktualisierende Seite
+        content_md: Neuer Markdown-Inhalt
+        title: Optional neuer Titel
+        edited_by: User oder System, der ändert
+        edit_reason: Grund der Änderung
+        expected_version: Erwartete Version (für Conflict Detection)
+
+    Returns:
+        Aktualisierte Seite
+
+    Raises:
+        ValueError: Wenn Version mismatch (Conflict Detection)
+    """
+    # Conflict Detection: Version prüfen
+    if expected_version is not None and page.version != expected_version:
+        raise ValueError(
+            f"Conflict: Wiki-Seite '{page.slug}' wurde inzwischen "
+            f"von einem anderen User geändert. "
+            f"Deine Version: {expected_version}, Aktuelle Version: {page.version}"
+        )
+
+    # Seite aktualisieren
+    page.content_md = content_md
+    if title:
+        page.title = title
+    page.version += 1  # Version incrementieren
+    page.update_count = (page.update_count or 1) + 1
+    page.last_updated = datetime.datetime.utcnow()
+    page.edited_by = edited_by
+    page.edit_reason = edit_reason
+
+    await db.flush()
+    return page
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

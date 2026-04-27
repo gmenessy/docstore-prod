@@ -92,7 +92,7 @@ async def chat_with_store(
             pass  # Erster Nachricht in Session — kein Verlauf
 
         # ── Hybrid-Suche – NUR innerhalb dieses Stores ──
-        hits = search_engine.search(
+        hits = await search_engine.search(
             query=user_message,
             search_type="hybrid",
             max_results=10,

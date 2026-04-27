@@ -3,6 +3,21 @@ name = "agentischer-docstore"
 version = "1.0.0"
 description = "Agentischer Document Store – Akte & WissensDB Backend"
 requires-python = ">=3.10"
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+zip-safe = false
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+exclude = ["app.tests*", "app.ingestion.tests*"]
+
+[tool.setuptools.package-data]
+"app" = ["py.typed"]
 dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.27.0",

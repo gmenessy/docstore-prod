@@ -11,7 +11,7 @@ import math
 import logging
 import time
 import asyncio
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from dataclasses import dataclass
 
 import numpy as np
@@ -29,9 +29,12 @@ logger = logging.getLogger(__name__)
 class EmbeddingClient:
     """Erzeugt Dense-Vectors via Ollama (oder anderer OpenAI-kompatibler API)."""
 
-    def __init__(self):
+    def __init__(self, cache_max_size: int = 5000):
         self._available = None  # None = nicht getestet
-        self._cache = {}  # text_hash -> vector
+        self._cache_max_size = cache_max_size
+        self._cache = OrderedDict()  # LRU-Cache: text_hash -> vector
+        self._cache_hits = 0
+        self._cache_misses = 0
 
     async def check_availability(self):
         """Pruefen ob Ollama Embeddings verfuegbar sind."""
@@ -56,12 +59,40 @@ class EmbeddingClient:
     def available(self):
         return self._available is True
 
+    def _get_from_cache(self, key: str) -> list[float] | None:
+        """LRU-Cache Lookup mit Move-to-End."""
+        if key in self._cache:
+            self._cache_moves_to_end(key)  # Mark als kuerzlich verwendet
+            self._cache_hits += 1
+            return self._cache[key]
+        self._cache_misses += 1
+        return None
+
+    def _put_in_cache(self, key: str, value: list[float]) -> None:
+        """LRU-Cache Insert mit Eviction."""
+        # Wenn Key existiert, aktualisieren und ans Ende verschieben
+        if key in self._cache:
+            self._cache.move_to_end(key)
+            self._cache[key] = value
+            return
+
+        # Neue Eintrag
+        self._cache[key] = value
+
+        # LRU-Eviction wenn Cache voll
+        if len(self._cache) > self._cache_max_size:
+            self._cache.popitem(last=False)  # Entferne aeltesten Eintrag
+
     def embed_sync(self, text: str) -> list[float] | None:
-        """Synchrones Embedding (fuer Batch-Indexierung)."""
+        """Synchrones Embedding (fuer Batch-Indexierung) mit LRU-Cache."""
         if not self.available:
             return None
         text_hash = hash(text[:200])
-        if text_hash in self._cache:
+
+        # Cache-Lookup
+        cached = self._get_from_cache(text_hash)
+        if cached is not None:
+            return cached
             return self._cache[text_hash]
         try:
             import httpx
@@ -73,11 +104,24 @@ class EmbeddingClient:
             if r.status_code == 200:
                 vec = r.json().get("embedding")
                 if vec:
-                    self._cache[text_hash] = vec
+                    self._put_in_cache(text_hash, vec)
                     return vec
         except Exception:
             pass
         return None
+
+    @property
+    def cache_stats(self) -> dict:
+        """Cache-Statistiken fuer Monitoring."""
+        total = self._cache_hits + self._cache_misses
+        hit_rate = self._cache_hits / total if total > 0 else 0
+        return {
+            "size": len(self._cache),
+            "max_size": self._cache_max_size,
+            "hits": self._cache_hits,
+            "misses": self._cache_misses,
+            "hit_rate": round(hit_rate, 3),
+        }
 
     def embed_batch_sync(self, texts: list[str]) -> list[list[float] | None]:
         """Batch-Embedding (sequentiell, fuer Indexierung)."""
@@ -161,74 +205,77 @@ class HybridSearchEngine:
         self._dirty = True
         self._lock = asyncio.Lock()
 
-    def add_chunks(self, chunks: list[dict]):
-        """Chunks zum Index hinzufuegen."""
-        for chunk in chunks:
-            self._corpus[chunk["id"]] = chunk
-        self._dirty = True
+    async def add_chunks(self, chunks: list[dict]):
+        """Chunks zum Index hinzufuegen (Thread-Safe mit Lock)."""
+        async with self._lock:
+            for chunk in chunks:
+                self._corpus[chunk["id"]] = chunk
+            self._dirty = True
 
-    def remove_document(self, document_id: str):
-        """Alle Chunks eines Dokuments entfernen."""
-        to_remove = [
-            cid for cid, c in self._corpus.items()
-            if c.get("document_id") == document_id
-        ]
-        for cid in to_remove:
-            del self._corpus[cid]
-            self._embeddings.pop(cid, None)
-        self._dirty = True
+    async def remove_document(self, document_id: str):
+        """Alle Chunks eines Dokuments entfernen (Thread-Safe mit Lock)."""
+        async with self._lock:
+            to_remove = [
+                cid for cid, c in self._corpus.items()
+                if c.get("document_id") == document_id
+            ]
+            for cid in to_remove:
+                del self._corpus[cid]
+                self._embeddings.pop(cid, None)
+            self._dirty = True
 
-    def rebuild_index(self):
-        """BM25- und Semantic-Index neu aufbauen."""
-        if not self._corpus:
-            self._bm25 = None
-            self._tfidf = None
-            self._tfidf_matrix = None
-            self._chunk_ids = []
+    async def rebuild_index(self):
+        """BM25- und Semantic-Index neu aufbauen (Thread-Safe mit Lock)."""
+        async with self._lock:
+            if not self._corpus:
+                self._bm25 = None
+                self._tfidf = None
+                self._tfidf_matrix = None
+                self._chunk_ids = []
+                self._dirty = False
+                return
+
+            self._chunk_ids = list(self._corpus.keys())
+            tokenized_corpus = []
+
+            for cid in self._chunk_ids:
+                content = self._corpus[cid].get("content", "")
+                tokens = tokenize_german(content)
+                tokenized_corpus.append(tokens)
+
+            # BM25
+            self._bm25 = BM25Okapi(tokenized_corpus)
+
+            # TF-IDF (Fallback wenn keine Embeddings)
+            texts = [self._corpus[cid].get("content", "") for cid in self._chunk_ids]
+            self._tfidf = TfidfVectorizer(
+                max_features=10000,
+                ngram_range=(1, 2),
+                stop_words=list(GERMAN_STOPWORDS),
+                lowercase=True,
+            )
+            self._tfidf_matrix = self._tfidf.fit_transform(texts)
+
+            # Dense-Embeddings (wenn Ollama verfuegbar)
+            if embedding_client.available:
+                new_chunks = [cid for cid in self._chunk_ids if cid not in self._embeddings]
+                if new_chunks:
+                    new_texts = [self._corpus[cid].get("content", "")[:2000] for cid in new_chunks]
+                    vecs = embedding_client.embed_batch_sync(new_texts)
+                    for cid, vec in zip(new_chunks, vecs):
+                        if vec:
+                            self._embeddings[cid] = vec
+                self._use_embeddings = len(self._embeddings) > len(self._chunk_ids) * 0.5
+                if self._use_embeddings:
+                    logger.info(f"Dense-Embeddings aktiv: {len(self._embeddings)}/{len(self._chunk_ids)} Chunks")
+            else:
+                self._use_embeddings = False
+
             self._dirty = False
-            return
+            mode = "Embeddings" if self._use_embeddings else "TF-IDF"
+            logger.info(f"Suchindex neu gebaut: {len(self._chunk_ids)} Chunks (Semantic: {mode})")
 
-        self._chunk_ids = list(self._corpus.keys())
-        tokenized_corpus = []
-
-        for cid in self._chunk_ids:
-            content = self._corpus[cid].get("content", "")
-            tokens = tokenize_german(content)
-            tokenized_corpus.append(tokens)
-
-        # BM25
-        self._bm25 = BM25Okapi(tokenized_corpus)
-
-        # TF-IDF (Fallback wenn keine Embeddings)
-        texts = [self._corpus[cid].get("content", "") for cid in self._chunk_ids]
-        self._tfidf = TfidfVectorizer(
-            max_features=10000,
-            ngram_range=(1, 2),
-            stop_words=list(GERMAN_STOPWORDS),
-            lowercase=True,
-        )
-        self._tfidf_matrix = self._tfidf.fit_transform(texts)
-
-        # Dense-Embeddings (wenn Ollama verfuegbar)
-        if embedding_client.available:
-            new_chunks = [cid for cid in self._chunk_ids if cid not in self._embeddings]
-            if new_chunks:
-                new_texts = [self._corpus[cid].get("content", "")[:2000] for cid in new_chunks]
-                vecs = embedding_client.embed_batch_sync(new_texts)
-                for cid, vec in zip(new_chunks, vecs):
-                    if vec:
-                        self._embeddings[cid] = vec
-            self._use_embeddings = len(self._embeddings) > len(self._chunk_ids) * 0.5
-            if self._use_embeddings:
-                logger.info(f"Dense-Embeddings aktiv: {len(self._embeddings)}/{len(self._chunk_ids)} Chunks")
-        else:
-            self._use_embeddings = False
-
-        self._dirty = False
-        mode = "Embeddings" if self._use_embeddings else "TF-IDF"
-        logger.info(f"Suchindex neu gebaut: {len(self._chunk_ids)} Chunks (Semantic: {mode})")
-
-    def search(
+    async def search(
         self,
         query: str,
         search_type: str = "hybrid",
@@ -238,14 +285,15 @@ class HybridSearchEngine:
         semantic_weight: float | None = None,
     ) -> list[SearchHit]:
         """
-        Hybrid-Suche durchführen.
+        Hybrid-Suche durchführen (Thread-Safe mit automatischem Rebuild).
 
         search_type: "hybrid" | "bm25" | "semantic"
         """
         start_time = time.monotonic()
 
+        # Lock-basierter Rebuild bei dirty Index
         if self._dirty:
-            self.rebuild_index()
+            await self.rebuild_index()
 
         if not self._chunk_ids:
             return []

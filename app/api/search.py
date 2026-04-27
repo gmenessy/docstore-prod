@@ -28,7 +28,7 @@ async def search(data: SearchRequest, db: AsyncSession = Depends(get_db), auth: 
     """
     start = time.monotonic()
 
-    hits = search_engine.search(
+    hits = await search_engine.search(
         query=data.query,
         search_type=data.search_type,
         max_results=data.max_results,

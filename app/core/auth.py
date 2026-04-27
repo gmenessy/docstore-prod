@@ -22,8 +22,16 @@ logger = logging.getLogger(__name__)
 _raw_keys = os.environ.get("DOCSTORE_API_KEYS", "")
 VALID_API_KEYS: set[str] = {k.strip() for k in _raw_keys.split(",") if k.strip()}
 
-# Dev-Modus: Wenn keine Keys konfiguriert, ist Auth deaktiviert
-AUTH_ENABLED = len(VALID_API_KEYS) > 0
+# Secure-by-Default: Auth ist aktiviert, solange nicht explizit deaktiviert
+# DOCSTORE_API_KEY_REQUIRED=false fuer Dev-Mode (nur wenn bewusst gesetzt!)
+_api_key_required = os.getenv("DOCSTORE_API_KEY_REQUIRED", "true").lower()
+AUTH_ENABLED = _api_key_required == "true"
+
+# Warnung bei Dev-Mode
+if not AUTH_ENABLED:
+    logger.warning("⚠️  API-Auth DEAKTIVIERT (Dev-Mode). Nur fuer Entwicklung nutzen!")
+elif not VALID_API_KEYS:
+    logger.warning("⚠️  API-Auth aktiviert, aber KEINE Keys konfiguriert! Setze DOCSTORE_API_KEYS")
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 

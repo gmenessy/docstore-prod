@@ -411,6 +411,10 @@ class WikiPage(Base):
     # Qualitaetsmetriken
     update_count = Column(Integer, default=1)  # Wie oft wurde diese Seite aktualisiert
     contradiction_flags = Column(JSON, default=list)  # [{"claim": "...", "sources": [...]}]
+    # ─── Optimistic Locking für Concurrency Control ───
+    version = Column(Integer, default=1, nullable=False)  # Version für Optimistic Locking
+    edited_by = Column(String(200), default="system")  # User oder System, der letzte Änderung gemacht hat
+    edit_reason = Column(String(500), default="")  # Grund der Änderung (für Wiki-History)
     # Zeitstempel
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     last_updated = Column(DateTime, default=datetime.datetime.utcnow)

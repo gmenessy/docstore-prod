@@ -13,6 +13,62 @@ from app.core.auth import verify_api_key
 
 # ─── Authentication & Authorization ───
 
+def test_secure_by_default():
+    """Test dass Auth standardmäßig aktiviert ist (Secure by Default)"""
+    import os
+    from app.core.auth import AUTH_ENABLED, VALID_API_KEYS
+
+    # Sichere dass DOCSTORE_API_KEY_REQUIRED nicht gesetzt ist
+    # Dann sollte default=true gelten
+    original_required = os.environ.get("DOCSTORE_API_KEY_REQUIRED")
+    original_keys = os.environ.get("DOCSTORE_API_KEYS")
+
+    try:
+        # Umgebung bereinigen
+        os.environ.pop("DOCSTORE_API_KEY_REQUIRED", None)
+        os.environ.pop("DOCSTORE_API_KEYS", None)
+
+        # Neu importieren um default zu testen
+        import importlib
+        import app.core.auth
+        importlib.reload(app.core.auth)
+
+        # Auth sollte aktiviert sein (default=true)
+        assert app.core.auth.AUTH_ENABLED == True, "Auth sollte standardmäßig aktiviert sein"
+    finally:
+        # Umgebung wiederherstellen
+        if original_required:
+            os.environ["DOCSTORE_API_KEY_REQUIRED"] = original_required
+        if original_keys:
+            os.environ["DOCSTORE_API_KEYS"] = original_keys
+        # Reload um original state wiederherzustellen
+        importlib.reload(app.core.auth)
+
+
+def test_auth_can_be_disabled():
+    """Test dass Auth explizit deaktiviert werden kann (Dev-Mode)"""
+    import os
+    import importlib
+    import app.core.auth
+
+    original_required = os.environ.get("DOCSTORE_API_KEY_REQUIRED")
+
+    try:
+        # Auth explizit deaktivieren
+        os.environ["DOCSTORE_API_KEY_REQUIRED"] = "false"
+        importlib.reload(app.core.auth)
+
+        # Auth sollte deaktiviert sein
+        assert app.core.auth.AUTH_ENABLED == False, "Auth sollte mit false deaktivierbar sein"
+    finally:
+        # Umgebung wiederherstellen
+        if original_required:
+            os.environ["DOCSTORE_API_KEY_REQUIRED"] = original_required
+        else:
+            os.environ.pop("DOCSTORE_API_KEY_REQUIRED", None)
+        importlib.reload(app.core.auth)
+
+
 def test_api_key_required():
     """Test dass API-Key erforderlich ist"""
     from fastapi.testclient import TestClient
