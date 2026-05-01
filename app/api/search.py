@@ -11,9 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.models.schemas import SearchRequest, SearchResponse, SearchResult
 from app.search.engine import search_engine
+from app.services.pii_redaction import PIIRedactor
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/search", tags=["Suche"])
+
+# PII-Redactor Instanz
+pii_redactor = PIIRedactor()
 
 
 @router.post("", response_model=SearchResponse)
@@ -25,6 +29,8 @@ async def search(data: SearchRequest, db: AsyncSession = Depends(get_db), auth: 
     - "hybrid": BM25 (0.4) + Semantic (0.6)
     - "bm25": Nur Keyword-Suche
     - "semantic": Nur semantische Suche
+
+    Security: PII-Redaction wird auf alle Suchergebnisse angewendet.
     """
     start = time.monotonic()
 
@@ -35,22 +41,28 @@ async def search(data: SearchRequest, db: AsyncSession = Depends(get_db), auth: 
         store_id=data.store_id,
     )
 
-    results = [
-        SearchResult(
-            document_id=hit.document_id,
-            document_title=hit.document_title,
-            store_id=hit.store_id,
-            store_name=hit.store_name,
-            chunk_id=hit.chunk_id,
-            chunk_content=hit.content[:500],  # Max 500 Zeichen
-            chunk_index=hit.chunk_index,
-            score=hit.score,
-            file_type=hit.file_type,
-            tags=hit.tags,
-            page_start=hit.page_start,
+    # PII-Redaction auf Suchergebnisse anwenden
+    results_with_pii = []
+    for hit in hits:
+        # PII aus Content entfernen
+        redaction_result = pii_redactor.redact_text(hit.content[:500])
+
+        results_with_pii.append(
+            SearchResult(
+                document_id=hit.document_id,
+                document_title=hit.document_title,
+                store_id=hit.store_id,
+                store_name=hit.store_name,
+                chunk_id=hit.chunk_id,
+                chunk_content=redaction_result.redacted_text,  # Redigierter Content
+                chunk_index=hit.chunk_index,
+                score=hit.score,
+                file_type=hit.file_type,
+                tags=hit.tags,
+                page_start=hit.page_start,
         )
-        for hit in hits
     ]
+    elapsed = (time.monotonic() - start) * 1000
 
     elapsed = (time.monotonic() - start) * 1000
 

@@ -11,6 +11,8 @@ from app.core.auth import verify_api_key, paginated_response
 from app.models.schemas import ChatRequest, ChatResponse
 from app.services.chat_service import chat_with_store, get_chat_history
 from app.core.llm_client import llm_client
+from app.security.prompt_injection import check_prompt_safety
+from app.services.confidence import calculate_confidence
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/stores/{store_id}/chat", tags=["Chat"])
@@ -32,7 +34,23 @@ async def send_message(
     - model: z.B. gpt-4o, claude-sonnet-4-20250514, llama3.2
 
     API-Keys werden nur noch über Umgebungsvariablen konfiguriert (DOCSTORE_*_API_KEY).
+
+    Security: Prompt-Injection Detection und Confidence Scoring.
     """
+    # 1. Prompt-Injection Check
+    is_safe, error = check_prompt_safety(data.message)
+    if not is_safe:
+        logger.warning(f"Prompt injection blocked: {data.message[:100]}")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "unsupported_query",
+                "message": "Diese Anfrage kann nicht verarbeitet werden.",
+                "reason": error
+            }
+        )
+
+    # 2. Chat durchführen
     try:
         result = await chat_with_store(
             db=db,
@@ -42,6 +60,24 @@ async def send_message(
             provider_id=data.provider,
             model=data.model,
         )
+
+        # 3. Confidence-Score berechnen
+        if result and result.get("answer"):
+            sources = result.get("sources", [])
+            confidence_result = calculate_confidence(
+                answer=result["answer"],
+                sources=sources,
+                query=data.message,
+                context=None  # Kann erweitert werden
+            )
+
+            # Confidence zur Antwort hinzufügen
+            result["confidence"] = {
+                "confidence": confidence_result.confidence,
+                "level": confidence_result.level,
+                "factors": confidence_result.factors,
+            }
+
         return result
     except ValueError as e:
         raise HTTPException(400, str(e))

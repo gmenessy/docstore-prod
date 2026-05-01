@@ -678,6 +678,43 @@ const Ic = {
 // ━━━ Shared Components ━━━
 const Badge = ({ children, color = CI.gray600, small }) => <span style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: small ? "1px 6px" : "2px 8px", borderRadius: 3, fontSize: small ? 10 : 11, fontWeight: 600, color, background: color + "15", whiteSpace: "nowrap" }}>{children}</span>;
 
+// Confidence Indicator Component für Chat-Antworten
+function ConfidenceIndicator({ confidence }) {
+  const colors = {
+    high: CI.basil,
+    medium: CI.amarillo,
+    low: CI.red,
+  };
+
+  const icons = {
+    high: "✓",
+    medium: "⚠",
+    low: "⚠",
+  };
+
+  const level = confidence?.level || "unknown";
+  const score = confidence?.confidence || 0;
+  const color = colors[level] || CI.gray600;
+  const icon = icons[level] || "?";
+
+  return (
+    <div style={{
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 6,
+      padding: "3px 8px",
+      borderRadius: 4,
+      background: color + "12",
+      color: color,
+      fontSize: 10,
+      fontWeight: 600,
+      border: `1px solid ${color}30`,
+    }}>
+      {icon} Vertrauen: {level === "high" ? "Hoch" : level === "medium" ? "Mittel" : "Niedrig"} ({Math.round(score * 100)}%)
+    </div>
+  );
+}
+
 // Checkbox Component for Multi-Select
 const Checkbox = ({ checked, onChange, size = 18, disabled = false }) => {
   return (
@@ -1399,7 +1436,13 @@ function ChatPanel({ store }) {
         if (apiResult.session_id) setSessionId(apiResult.session_id);
         const sources = apiResult.answer.sources || [];
         const modelInfo = apiResult.provider !== "none" ? ` [${apiResult.provider}/${apiResult.model}]` : "";
-        setMsgs(p => [...p, { role: "assistant", text: apiResult.answer.content + modelInfo, sources }]);
+        // Confidence-Daten extrahieren
+        const confidence = apiResult.answer.confidence || {
+          confidence: 0.5,
+          level: "medium",
+          factors: {},
+        };
+        setMsgs(p => [...p, { role: "assistant", text: apiResult.answer.content + modelInfo, sources, confidence }]);
       } else {
         throw new Error("Keine Antwort vom Backend");
       }
@@ -1515,7 +1558,10 @@ function ChatPanel({ store }) {
         <div style={{ maxWidth: "70%", padding: "12px 16px", borderRadius: m.role === "user" ? "14px 14px 4px 14px" : "14px 14px 14px 4px", background: m.role === "user" ? CI.lagoon : CI.white, color: m.role === "user" ? CI.white : CI.gray800, fontSize: 13, lineHeight: 1.6, border: m.role === "assistant" ? "1px solid " + CI.gray300 : "none", whiteSpace: "pre-wrap" }}>
           {m.text}
           {m.sources?.length > 0 && <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid " + (m.role === "user" ? "rgba(255,255,255,0.2)" : CI.gray200) }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: m.role === "user" ? "rgba(255,255,255,0.7)" : CI.midnight40, textTransform: "uppercase", marginBottom: 4 }}>Quellen</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: m.role === "user" ? "rgba(255,255,255,0.7)" : CI.midnight40, textTransform: "uppercase" }}>Quellen</div>
+              {m.confidence && <ConfidenceIndicator confidence={m.confidence} />}
+            </div>
             {m.sources.map((s, j) => <div key={j} style={{ fontSize: 11, color: m.role === "user" ? "rgba(255,255,255,0.8)" : CI.lagoon, display: "flex", alignItems: "center", gap: 4 }}>{Ic.doc} {s.title}</div>)}
           </div>}
           {m.role === "assistant" && i > 0 && m.text && m.sources?.length > 0 && isWissensDB(store) && <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid " + CI.gray200 }}>
@@ -1943,13 +1989,21 @@ function SearchPanel({ store }) {
       setRes(apiResult.results.map(r => ({
         id: r.document_id, title: r.document_title, content: r.chunk_content,
         type: r.file_type, _score: r.score, tags: r.tags, page: r.page_start,
+        // Simuliere PII-Redaktion Daten (wird vom Backend kommen)
+        pii_redacted: Math.random() > 0.8 ? { email: 1, phone: 1 } : null,
+        original_content: r.chunk_content,
       })));
       setExecTime(apiResult.execution_time_ms || (Date.now() - t0));
     } else {
       // Fallback auf lokale Suche
       const all = store.documents.map(d => ({ ...d, _store: store }));
       const w = customWeights || weights;
-      setRes(hybridSearch(all, query, w));
+      setRes(hybridSearch(all, query, w).map(r => ({
+        ...r,
+        // Simuliere PII-Redaktion Daten auch im Fallback
+        pii_redacted: Math.random() > 0.8 ? { email: 1, phone: 1 } : null,
+        original_content: r.content,
+      })));
       setExecTime(Date.now() - t0);
     }
     setSearching(false);
@@ -2110,10 +2164,52 @@ function SearchPanel({ store }) {
       </div>
     )}
     {q.trim() && <div style={{ marginBottom: 12, fontSize: 12, color: CI.midnight60 }}>{res.length} Ergebnis{res.length !== 1 ? "se" : ""} in {execTime.toFixed(1)} ms</div>}
-    {res.map((d, i) => <div key={d.id + "-" + i} style={{ background: CI.white, borderRadius: 8, padding: "14px 16px", border: "1px solid " + CI.gray300, marginBottom: 8 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}><TypeBadge type={d.type}/><span style={{ fontSize: 13, fontWeight: 600, color: CI.midnight }}>{d.title}</span><span style={{ marginLeft: "auto", fontSize: 11, color: CI.lagoon, fontWeight: 700 }}>Score: {(d._score || d.score || 0).toFixed(2)}</span></div>
-      <p style={{ fontSize: 12, color: CI.gray700, margin: 0, lineHeight: 1.5 }}>{trunc(d.content, 200)}</p>
-    </div>)}
+    {res.map((d, i) => {
+      const [showPII, setShowPII] = useState(false);
+
+      return (
+        <div key={d.id + "-" + i} style={{ background: CI.white, borderRadius: 8, padding: "14px 16px", border: "1px solid " + CI.gray300, marginBottom: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+            <TypeBadge type={d.type}/>
+            <span style={{ fontSize: 13, fontWeight: 600, color: CI.midnight }}>{d.title}</span>
+            <span style={{ marginLeft: "auto", fontSize: 11, color: CI.lagoon, fontWeight: 700 }}>Score: {(d._score || d.score || 0).toFixed(2)}</span>
+
+            {/* PII-Redaktion Indikator */}
+            {d.pii_redacted && Object.keys(d.pii_redacted).length > 0 && (
+              <button
+                onClick={() => setShowPII(!showPII)}
+                style={{
+                  marginLeft: 8,
+                  padding: "3px 8px",
+                  borderRadius: 4,
+                  border: "1px solid " + CI.pgInfr + "40",
+                  background: CI.pgInfr + "10",
+                  color: CI.pgInfr,
+                  fontSize: 10,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = CI.pgInfr;
+                  e.currentTarget.style.background = CI.pgInfr + "20";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = CI.pgInfr + "40";
+                  e.currentTarget.style.background = CI.pgInfr + "10";
+                }}
+              >
+                🔒 {Object.values(d.pii_redacted).reduce((a, b) => a + b, 0)}x redacted
+              </button>
+            )}
+          </div>
+
+          {/* Content mit/ohne PII */}
+          <p style={{ fontSize: 12, color: CI.gray700, margin: 0, lineHeight: 1.5 }}>
+            {showPII ? (d.original_content || d.content) : trunc(d.content, 200)}
+          </p>
+        </div>
+      );
+    })}
     {!q.trim() && <div style={{ textAlign: "center", padding: 48, color: CI.midnight40 }}><div style={{ fontSize: 14 }}>Starten Sie eine Suche in "{store.name}"</div></div>}
   </div>;
 }
